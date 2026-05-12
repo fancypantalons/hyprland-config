@@ -56,7 +56,7 @@ local function shquote(s)
 end
 
 ---Send a desktop notification via notify-send (routed to swaync).
----@param opts table {text:string, icon?:string, timeout?:number, title?:string, urgency?:string}
+---@param opts table {text:string, icon?:string, timeout?:number, title?:string, urgency?:string, hints?:string[]}
 function notify.send(opts)
     opts = opts or {}
 
@@ -66,7 +66,7 @@ function notify.send(opts)
     local timeout = opts.timeout or 3000
     local urgency = opts.urgency  -- low | normal | critical
 
-    local cmd = { "notify-send" }
+    local cmd = { "notify-send", "-e" }
     table.insert(cmd, "-t " .. tonumber(timeout))
 
     if icon and icon ~= "" then
@@ -75,6 +75,11 @@ function notify.send(opts)
 
     if urgency then
         table.insert(cmd, "-u " .. shquote(urgency))
+    end
+
+    -- Extra hints, e.g. { "int:value:75", "string:x-canonical-private-synchronous:vol" }
+    for _, hint in ipairs(opts.hints or {}) do
+        table.insert(cmd, "-h " .. shquote(hint))
     end
 
     -- notify-send takes <summary> and optional <body>.
@@ -114,7 +119,17 @@ function notify.volume(volume, muted)
         text = string.format("Volume: %d%%", volume)
     end
 
-    notify.send({ text = text, icon = icon, timeout = 2000 })
+    notify.send({
+        text = text,
+        icon = icon,
+        timeout = 2000,
+        urgency = "low",
+        hints = {
+            "int:value:" .. (muted and 0 or volume),
+            "string:x-canonical-private-synchronous:volume_notif",
+            "boolean:SWAYNC_BYPASS_DND:true",
+        },
+    })
 end
 
 ---Show a microphone mute state notification
@@ -138,6 +153,12 @@ function notify.brightness(brightness)
         text = string.format("Brightness: %d%%", brightness),
         icon = ICONS.brightness.screen,
         timeout = 2000,
+        urgency = "low",
+        hints = {
+            "int:value:" .. brightness,
+            "string:x-canonical-private-synchronous:brightness_notif",
+            "boolean:SWAYNC_BYPASS_DND:true",
+        },
     })
 end
 

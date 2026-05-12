@@ -106,22 +106,8 @@ end
 -- @param volume number The current volume level
 -- @param muted boolean Whether the volume is muted
 local function notify_volume(volume, muted)
-    local icon = get_volume_icon(volume, muted)
     local notify = require("utils.notify")
-
-    if muted then
-        notify.send({
-            text = "Volume: Muted",
-            icon = icon,
-            timeout = 2000
-        })
-    else
-        notify.send({
-            text = string.format("Volume: %d%%", volume),
-            icon = icon,
-            timeout = 2000
-        })
-    end
+    notify.volume(volume, muted)
 end
 
 ---Send a microphone notification

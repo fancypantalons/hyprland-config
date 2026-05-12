@@ -138,13 +138,7 @@ end
 ---Send a screen brightness notification
 -- @param brightness number The current brightness level
 local function notify_brightness(brightness)
-    local icon = get_brightness_icon(brightness)
-
-    notify.send({
-        text = string.format("Brightness: %d%%", brightness),
-        icon = icon,
-        timeout = 2000
-    })
+    notify.brightness(brightness)
 end
 
 ---Send a keyboard brightness notification
