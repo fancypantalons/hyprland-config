@@ -1,0 +1,45 @@
+-- Autostart applications
+-- Based on Startup_Apps.conf
+
+
+hl.on("hyprland.start", function()
+  -- Make sure any running tmux instances don't hold on to this old variable
+  hl.exec_cmd("tmux setenv -g HYPRLAND_INSTANCE_SIGNATURE \"" .. os.getenv("HYPRLAND_INSTANCE_SIGNATURE") .. "\"")
+  
+  -- Fire up an ssh agent
+  hl.exec_cmd("ssh-agent -D -a " .. os.getenv("SSH_AUTH_SOCK"))
+  
+  -- Wallpaper stuff
+  hl.exec_cmd("swww-daemon --format xrgb")
+  
+  -- Cursor stuff
+  hl.exec_cmd("hyprctl setcursor Adwaita 24")
+  
+  -- DBus environment
+  hl.exec_cmd("dbus-update-activation-environment --systemd WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
+  hl.exec_cmd("systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP")
+  
+  -- XDG Desktop Portals (for screensharing, file opening, etc.)
+  user.system.start_portals()
+
+  -- Polkit
+  user.system.start_polkit()
+  
+  -- Startup apps
+  hl.exec_cmd("nm-applet --indicator")
+  hl.exec_cmd("swaync")
+  hl.exec_cmd("ags")
+  hl.exec_cmd("blueman-applet")
+  hl.exec_cmd("waybar")
+  hl.exec_cmd("qs")  -- quickshell AGS Desktop Overview alternative
+  
+  -- Clipboard manager
+  hl.exec_cmd("wl-paste --type text --watch cliphist store")
+  hl.exec_cmd("wl-paste --type image --watch cliphist store")
+  
+  -- Starting hypridle to start hyprlock
+  hl.exec_cmd("hypridle")
+  
+  -- Special workspace for keepassxc
+  hl.exec_cmd("keepassxc", { workspace = "special:keepassxc", silent = true })
+end)

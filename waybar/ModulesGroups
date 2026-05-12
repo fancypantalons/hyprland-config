@@ -14,7 +14,6 @@
         },
 	"modules": [
 		"custom/menu",
-		"custom/light_dark",
 		"custom/file_manager",
 		"custom/tty",
 		"custom/browser",

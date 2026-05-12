@@ -1,0 +1,613 @@
+---
+-- Session and Screenshot Functions
+-- Provides screen lock, power menu, screenshots, and key hints
+--
+-- @module user-functions.session
+-- @author Brett
+-- @license MIT
+
+local session = {}
+local helpers = require("utils.helpers")
+local notify = require("utils.notify")
+
+-- ============================================
+-- CONFIGURATION
+-- ============================================
+
+local ICON_DIR = os.getenv("HOME") .. "/.config/swaync/icons"
+local IMAGE_DIR = os.getenv("HOME") .. "/.config/swaync/images"
+local SCRIPT_DIR = os.getenv("HOME") .. "/.config/hypr/scripts"
+local CONFIG_DIR = os.getenv("HOME") .. "/.config/hypr"
+local ROFI_DIR = os.getenv("HOME") .. "/.config/rofi"
+
+local ICON_PICTURE = ICON_DIR .. "/picture.png"
+local ICON_NOTE = IMAGE_DIR .. "/note.png"
+local ICON_TIMER = ICON_DIR .. "/timer.png"
+
+-- Screenshot modes
+local SCREENSHOT_MODES = {
+    NOW = "now",
+    AREA = "area",
+    WINDOW = "window",
+    TIMER_5 = "5",
+    TIMER_10 = "10",
+    SWAPPY = "swappy"
+}
+
+-- ============================================
+-- HELPER FUNCTIONS
+-- ============================================
+
+---Get the screenshot directory path
+-- Uses xdg-user-dir to find the Pictures directory
+-- @return string The full path to the Screenshots directory
+local function get_screenshot_dir()
+    local result = helpers.exec("xdg-user-dir PICTURES")
+    local base_dir = result.stdout:gsub("%s+$", "")
+
+    return base_dir .. "/Screenshots"
+end
+
+---Generate a filename for screenshots
+-- Format: Screenshot_${time}_${RANDOM}.png
+-- @return string The generated filename
+local function generate_filename()
+    local time_result = helpers.exec("date '+%d-%b_%H-%M-%S'")
+    local time_str = time_result.stdout:gsub("%s+$", "")
+    local random_val = math.random(1000, 9999)
+
+    return string.format("Screenshot_%s_%d.png", time_str, random_val)
+end
+
+---Ensure the screenshots directory exists
+-- Creates the directory if it doesn't exist
+local function ensure_screenshot_dir()
+    local dir = get_screenshot_dir()
+    hl.exec_cmd("mkdir -p " .. dir)
+
+    return dir
+end
+
+---Get active window geometry for screenshots
+-- @return string|nil The geometry string "x,y WxH" or nil on error
+local function get_active_window_geometry()
+    local w = hl.get_active_window()
+    if not w then
+        return nil
+    end
+    return string.format("%d,%d %dx%d", w.at[1], w.at[2], w.size[1], w.size[2])
+end
+
+---Get active window class name
+-- @return string|nil The window class name or nil on error
+local function get_active_window_class()
+    local w = hl.get_active_window()
+    return w and w.class or nil
+end
+
+---Generate filename for active window screenshot
+-- Format: Screenshot_${time}_${class}.png
+-- @param class string The window class name
+-- @return string The generated filename
+local function generate_active_window_filename(class)
+    local time_result = helpers.exec("date '+%d-%b_%H-%M-%S'")
+    local time_str = time_result.stdout:gsub("%s+$", "")
+
+    return string.format("Screenshot_%s_%s.png", time_str, class)
+end
+
+---Play screenshot sound effect
+-- Uses the Sounds.sh script
+local function play_screenshot_sound()
+    hl.exec_cmd(SCRIPT_DIR .. "/Sounds.sh --screenshot")
+end
+
+---Play error sound effect
+-- Uses the Sounds.sh script
+local function play_error_sound()
+    hl.exec_cmd(SCRIPT_DIR .. "/Sounds.sh --error")
+end
+
+---Show countdown notification
+-- Displays a notification counting down from the specified seconds
+-- @param seconds number The number of seconds to count down
+local function show_countdown(seconds)
+    for sec = seconds, 1, -1 do
+        notify.send({
+            text = string.format("Taking shot in: %d secs", sec),
+            icon = ICON_TIMER,
+            timeout = 1000
+        })
+
+        helpers.sleep(1)
+    end
+end
+
+---Show screenshot notification with actions
+-- Displays a notification with Open and Delete actions
+-- @param filepath string The path to the screenshot file
+-- @param title string The notification title
+local function notify_screenshot(filepath, title)
+    local notify_cmd = string.format(
+        'notify-send -t 10000 -A action1=Open -A action2=Delete -h string:x-canonical-private-synchronous:shot-notify -i %s "%s"',
+        ICON_PICTURE,
+        title or "Screenshot Saved"
+    )
+
+    local result = helpers.exec(notify_cmd)
+
+    if result.success and result.stdout then
+        local response = result.stdout:gsub("%s+$", "")
+
+        if response == "action1" then
+            hl.exec_cmd("xdg-open '" .. filepath .. "' &")
+        elseif response == "action2" then
+            hl.exec_cmd("rm '" .. filepath .. "'")
+        end
+    end
+end
+
+---Show error notification for failed screenshot
+-- @param title string The error title
+local function notify_screenshot_error(title)
+    local notify = require("utils.notify")
+    notify.error(title or "Screenshot NOT Saved")
+    play_error_sound()
+end
+
+-- ============================================
+-- SCREEN LOCK
+-- ============================================
+
+---Lock the screen using loginctl
+-- Uses the session manager to lock the session
+-- @function lock
+function session.lock()
+    local success, err = pcall(function()
+        local result = helpers.exec("loginctl lock-session")
+
+        if (not result.success) then
+            local notify = require("utils.notify")
+            notify.error("Failed to lock screen", result.stderr)
+        else
+            local notify = require("utils.notify")
+            notify.lock()
+        end
+    end)
+
+    if (not success) then
+        local notify = require("utils.notify")
+        notify.error("Lock screen failed", tostring(err))
+    end
+end
+
+-- ============================================
+-- LOGOUT / POWER MENU
+-- ============================================
+
+---Get the focused monitor's logical height and scale factor.
+-- "Logical height" = pixel height divided by scale, truncated like the old
+-- shell pipeline did (`height / scale | awk '{print $1}'` discarded fractional).
+-- @return number height
+-- @return number scale
+local function get_monitor_info()
+    local m = hl.get_active_monitor()
+    if not m then
+        return 1080, 1.0
+    end
+    return math.floor(m.height / m.scale), m.scale
+end
+
+---Calculate wlogout margins based on screen resolution
+-- @param height number The monitor height
+-- @param scale number The monitor scale factor
+-- @return number t_val The top margin
+-- @return number b_val The bottom margin
+local function calculate_margins(height, scale)
+    -- Base margins for different resolutions
+    local margins = {
+        [2160] = { t = 600, b = 600 },
+        [1600] = { t = 400, b = 400 },
+        [1440] = { t = 400, b = 400 },
+        [1080] = { t = 450, b = 450 },
+        [720] = { t = 250, b = 250 }
+    }
+
+    local base_t, base_b
+
+    if height >= 2160 then
+        base_t, base_b = 600, 600
+    elseif height >= 1600 then
+        base_t, base_b = 400, 400
+    elseif height >= 1440 then
+        base_t, base_b = 400, 400
+    elseif height >= 1080 then
+        base_t, base_b = 450, 450
+    elseif height >= 720 then
+        base_t, base_b = 250, 250
+    else
+        base_t, base_b = 200, 200
+    end
+
+    -- Adjust for resolution and scale
+    local t_val = math.floor(base_t * height * scale / height)
+    local b_val = math.floor(base_b * height * scale / height)
+
+    return t_val, b_val
+end
+
+---Show the power menu (wlogout)
+-- Detects monitor resolution, calculates margins, and launches wlogout
+-- Kills existing wlogout instance first
+-- @function logout
+function session.logout()
+    local success, err = pcall(function()
+        -- Kill existing wlogout
+        hl.exec_cmd("pkill -x wlogout 2>/dev/null || true")
+
+        -- Get monitor info
+        local height, scale = get_monitor_info()
+
+        -- Calculate margins
+        local t_val, b_val = calculate_margins(height, scale)
+
+        -- Launch wlogout with explicit config paths
+        local home = os.getenv("HOME")
+        local wlogout_cmd = string.format(
+            "wlogout --protocol layer-shell -b 6 -T %d -B %d -l '%s/.config/wlogout/layout' -s '%s/.config/wlogout/style.css' &",
+            t_val,
+            b_val,
+            home,
+            home
+        )
+
+        hl.exec_cmd(wlogout_cmd)
+    end)
+
+    if (not success) then
+        local notify = require("utils.notify")
+        notify.error("Logout menu failed", tostring(err))
+    end
+end
+
+-- ============================================
+-- SCREENSHOT FUNCTIONS
+-- ============================================
+
+---Take an immediate screenshot
+-- Captures the entire screen and copies to clipboard
+-- Saves to the Screenshots directory
+local function screenshot_now()
+    local dir = ensure_screenshot_dir()
+    local filename = generate_filename()
+    local filepath = dir .. "/" .. filename
+
+    local result = helpers.exec(string.format("cd %s && grim - | tee %s | wl-copy", dir, filename))
+
+    helpers.sleep(2)
+
+    local check_result = helpers.exec("test -f " .. filepath)
+
+    if check_result.success then
+        play_screenshot_sound()
+        notify_screenshot(filepath, "Screenshot Saved")
+    else
+        notify_screenshot_error("Screenshot NOT Saved")
+    end
+end
+
+---Take a screenshot with a timer
+-- Shows countdown, then captures the entire screen
+-- @param seconds number The number of seconds to wait
+local function screenshot_timer(seconds)
+    show_countdown(seconds)
+    helpers.sleep(1)
+
+    local dir = ensure_screenshot_dir()
+    local filename = generate_filename()
+    local filepath = dir .. "/" .. filename
+
+    local result = helpers.exec(string.format("cd %s && grim - | tee %s | wl-copy", dir, filename))
+
+    helpers.sleep(1)
+
+    local check_result = helpers.exec("test -f " .. filepath)
+
+    if check_result.success then
+        play_screenshot_sound()
+        notify_screenshot(filepath, "Screenshot Saved")
+    else
+        notify_screenshot_error("Screenshot NOT Saved")
+    end
+end
+
+---Take a screenshot of the active window
+-- Captures only the currently focused window
+local function screenshot_window()
+    local dir = ensure_screenshot_dir()
+    local class = get_active_window_class()
+
+    if (not class) then
+        notify_screenshot_error("No active window found")
+
+        return
+    end
+
+    local filename = generate_active_window_filename(class)
+    local filepath = dir .. "/" .. filename
+
+    local geometry = get_active_window_geometry()
+
+    if (not geometry) then
+        notify_screenshot_error("Failed to get window geometry")
+
+        return
+    end
+
+    hl.exec_cmd(string.format("grim -g '%s' %s", geometry, filepath))
+    helpers.sleep(1)
+
+    local check_result = helpers.exec("test -f " .. filepath)
+
+    if check_result.success then
+        play_screenshot_sound()
+
+        -- Copy to clipboard
+        hl.exec_cmd("wl-copy < " .. filepath)
+
+        -- Show notification with window class
+        local notify_cmd = string.format(
+            'notify-send -t 10000 -A action1=Open -A action2=Delete -h string:x-canonical-private-synchronous:shot-notify -i %s " Screenshot of:" " %s Saved."',
+            ICON_PICTURE,
+            class
+        )
+
+        local result = helpers.exec(notify_cmd)
+
+        if result.success and result.stdout then
+            local response = result.stdout:gsub("%s+$", "")
+
+            if response == "action1" then
+                hl.exec_cmd("xdg-open '" .. filepath .. "' &")
+            elseif response == "action2" then
+                hl.exec_cmd("rm '" .. filepath .. "'")
+            end
+        end
+    else
+        local notify_cmd = string.format(
+            'notify-send -u low -i %s " Screenshot of:" " %s NOT Saved."',
+            ICON_NOTE,
+            class
+        )
+
+        hl.exec_cmd(notify_cmd)
+        play_error_sound()
+    end
+end
+
+---Take a screenshot of a selected area
+-- Uses slurp for area selection
+local function screenshot_area()
+    local dir = ensure_screenshot_dir()
+    local filename = generate_filename()
+    local filepath = dir .. "/" .. filename
+
+    local tmpfile = "/tmp/screenshot_area_" .. tostring(math.random(1000, 9999)) .. ".png"
+
+    -- Capture area to temp file
+    hl.exec_cmd(string.format("grim -g \"$(slurp)\" - > %s", tmpfile))
+
+    -- Check if file was created and has content
+    local check_result = helpers.exec("test -s " .. tmpfile)
+
+    if check_result.success then
+        -- Copy to clipboard
+        hl.exec_cmd("wl-copy < " .. tmpfile)
+
+        -- Move to final location
+        hl.exec_cmd(string.format("mv %s %s", tmpfile, filepath))
+
+        play_screenshot_sound()
+        notify_screenshot(filepath, "Screenshot Saved")
+    end
+end
+
+---Take a screenshot and open in swappy
+-- Uses slurp for area selection, then opens in swappy editor
+local function screenshot_swappy()
+    local tmpfile = "/tmp/screenshot_swappy_" .. tostring(math.random(1000, 9999)) .. ".png"
+
+    -- Capture area to temp file
+    hl.exec_cmd(string.format("grim -g \"$(slurp)\" - > %s", tmpfile))
+
+    -- Check if file was created and has content
+    local check_result = helpers.exec("test -s " .. tmpfile)
+
+    if check_result.success then
+        -- Copy to clipboard
+        hl.exec_cmd("wl-copy < " .. tmpfile)
+
+        play_screenshot_sound()
+
+        -- Show notification with swappy option
+        local notify_cmd = string.format(
+            'notify-send -t 10000 -A action1=Open -A action2=Delete -h string:x-canonical-private-synchronous:shot-notify -i %s " Screenshot:" " Captured by Swappy"',
+            ICON_PICTURE
+        )
+
+        local result = helpers.exec(notify_cmd)
+
+        if result.success and result.stdout then
+            local response = result.stdout:gsub("%s+$", "")
+
+            if response == "action1" then
+                hl.exec_cmd("swappy -f - < " .. tmpfile)
+            elseif response == "action2" then
+                hl.exec_cmd("rm " .. tmpfile)
+            end
+        end
+    end
+end
+
+---Take a screenshot with various modes
+-- Supports: "now" (immediate), "area" (slurp selection), "window" (active window),
+-- "5" (5s timer), "10" (10s timer), "swappy" (to swappy editor)
+-- @function screenshot
+-- @param mode string The screenshot mode
+function session.screenshot(mode)
+    local success, err = pcall(function()
+        if mode == SCREENSHOT_MODES.NOW then
+            screenshot_now()
+        elseif mode == SCREENSHOT_MODES.AREA then
+            screenshot_area()
+        elseif mode == SCREENSHOT_MODES.WINDOW then
+            screenshot_window()
+        elseif mode == SCREENSHOT_MODES.TIMER_5 then
+            screenshot_timer(5)
+        elseif mode == SCREENSHOT_MODES.TIMER_10 then
+            screenshot_timer(10)
+        elseif mode == SCREENSHOT_MODES.SWAPPY then
+            screenshot_swappy()
+        else
+            local notify = require("utils.notify")
+            notify.error("Unknown screenshot mode: " .. tostring(mode))
+        end
+    end)
+
+    if (not success) then
+        local notify = require("utils.notify")
+        notify.error("Screenshot failed", tostring(err))
+    end
+end
+
+-- ============================================
+-- KEY HINTS
+-- ============================================
+
+---Show key hints with yad
+-- Kills existing rofi/yad first, then launches yad with cheat sheet
+-- @function show_hints
+function session.show_hints()
+    local success, err = pcall(function()
+        -- Kill existing rofi/yad
+        hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
+        hl.exec_cmd("pkill -x yad 2>/dev/null || true")
+
+        -- Launch yad with cheat sheet
+        local yad_cmd = [[GDK_BACKEND=wayland yad \
+            --center \
+            --width=1000 \
+            --height=700 \
+            --title="KooL Quick Cheat Sheet" \
+            --no-buttons \
+            --list \
+            --column=Key: \
+            --column=Description: \
+            --column=Command: \
+            --timeout-indicator=bottom \
+            "ESC" "close this app" "" \
+            " = " "SUPER KEY (Windows Key Button)" "(SUPER KEY)" \
+            " SHIFT K" "Searchable Keybinds" "(Search all Keybinds via rofi)" \
+            " SHIFT E" "KooL Hyprland Settings Menu" "" \
+            "" "" "" \
+            " enter" "Terminal" "(kitty)" \
+            " SHIFT enter" "DropDown Terminal" " Q to close" \
+            " B" "Launch Browser" "(Default browser)" \
+            " A" "Desktop Overview" "(AGS - if opted to install)" \
+            " D" "Application Launcher" "(rofi-wayland)" \
+            " E" "Open File Manager" "(Thunar)" \
+            " S" "Google Search using rofi" "(rofi)" \
+            " Q" "close active window" "(not kill)" \
+            " Shift Q " "kills an active window" "(kill)" \
+            " ALT mouse scroll up/down   " "Desktop Zoom" "Desktop Magnifier" \
+            " Alt V" "Clipboard Manager" "(cliphist)" \
+            " W" "Choose wallpaper" "(Wallpaper Menu)" \
+            " Shift W" "Choose wallpaper effects" "(imagemagick + swww)" \
+            "CTRL ALT W" "Random wallpaper" "(via swww)" \
+            " CTRL ALT B" "Hide/UnHide Waybar" "waybar" \
+            " CTRL B" "Choose waybar styles" "(waybar styles)" \
+            " ALT B" "Choose waybar layout" "(waybar layout)" \
+            " ALT R" "Reload Waybar swaync Rofi" "CHECK NOTIFICATION FIRST!!!" \
+            " SHIFT N" "Launch Notification Panel" "swaync Notification Center" \
+            " Print" "screenshot" "(grim)" \
+            " Shift Print" "screenshot region" "(grim + slurp)" \
+            " Shift S" "screenshot region" "(swappy)" \
+            " CTRL Print" "screenshot timer 5 secs " "(grim)" \
+            " CTRL SHIFT Print" "screenshot timer 10 secs " "(grim)" \
+            "ALT Print" "Screenshot active window" "active window only" \
+            "CTRL ALT P" "power-menu" "(wlogout)" \
+            "CTRL ALT L" "screen lock" "(hyprlock)" \
+            "CTRL ALT Del" "Hyprland Exit" "(NOTE: Hyprland Will exit immediately)" \
+            " SHIFT F" "Fullscreen" "Toggles to full screen" \
+            " CTL F" "Fake Fullscreen" "Toggles to fake full screen" \
+            " ALT L" "Toggle Dwindle | Master Layout" "Hyprland Layout" \
+            " SPACEBAR" "Toggle float" "single window" \
+            " ALT SPACEBAR" "Toggle all windows to float" "all windows" \
+            " ALT O" "Toggle Blur" "normal or less blur" \
+            " CTRL O" "Toggle Opaque ON or OFF" "on active window only" \
+            " Shift A" "Animations Menu" "Choose Animations via rofi" \
+            " CTRL R" "Rofi Themes Menu" "Choose Rofi Themes via rofi" \
+            " CTRL Shift R" "Rofi Themes Menu v2" "Choose Rofi Themes via Theme Selector (modified)" \
+            " SHIFT G" "Gamemode! All animations OFF or ON" "toggle" \
+            " ALT E" "Rofi Emoticons" "Emoticon" \
+            " H" "Launch this Quick Cheat Sheet" "" \
+            "" "" "" \
+            "More tips:" "https://github.com/JaKooLit/Hyprland-Dots/wiki" ""]]
+
+        hl.exec_cmd(yad_cmd)
+    end)
+
+    if (not success) then
+        local notify = require("utils.notify")
+        notify.error("Key hints failed", tostring(err))
+    end
+end
+
+-- ============================================
+-- KEY BINDS (SEARCHABLE)
+-- ============================================
+
+---Show searchable keybinds with rofi
+-- Kills yad first, parses binds from config files, shows in rofi
+-- @function show_binds
+function session.show_binds()
+    local success, err = pcall(function()
+        -- Kill yad
+        hl.exec_cmd("pkill -x yad 2>/dev/null || true")
+
+        -- Kill existing rofi
+        hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
+
+        -- Define config files
+        local keybinds_conf = CONFIG_DIR .. "/configs/Keybinds.conf"
+        local user_keybinds_conf = CONFIG_DIR .. "/UserConfigs/UserKeybinds.conf"
+        local laptop_conf = CONFIG_DIR .. "/UserConfigs/Laptops.conf"
+        local rofi_theme = ROFI_DIR .. "/config-keybinds.rasi"
+        local msg = "☣️ NOTE ☣️: Clicking with Mouse or Pressing ENTER will have NO function"
+
+        -- Build the command to collect keybinds
+        local keybinds_cmd = string.format("cat %s %s 2>/dev/null | grep -E '^bind'", keybinds_conf, user_keybinds_conf)
+
+        -- Check if laptop.conf exists and add its binds
+        local laptop_check = helpers.exec("test -f " .. laptop_conf)
+
+        if laptop_check.success then
+            keybinds_cmd = keybinds_cmd .. string.format("; grep -E '^bind' %s 2>/dev/null", laptop_conf)
+        end
+
+        -- Replace $mainMod with SUPER for display
+        keybinds_cmd = keybinds_cmd .. " | sed 's/\\$mainMod/SUPER/g'"
+
+        -- Launch rofi
+        local rofi_cmd = string.format("%s | rofi -dmenu -i -config %s -mesg '%s' &", keybinds_cmd, rofi_theme, msg)
+
+        hl.exec_cmd(rofi_cmd)
+    end)
+
+    if (not success) then
+        local notify = require("utils.notify")
+        notify.error("Key binds failed", tostring(err))
+    end
+end
+
+return session

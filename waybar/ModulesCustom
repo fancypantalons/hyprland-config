@@ -11,8 +11,7 @@
 	"format-alt-click": "click",
 	"interval": 3600,
 	"return-type": "json",
-	"exec": "$HOME/.config/hypr/UserScripts/Weather.py",
-	//"exec": "$HOME/.config/hypr/UserScripts/Weather.sh",
+	"exec": "$HOME/.config/hypr/scripts/Weather.py",
 	//"exec-if": "ping wttr.in -c1",
 	"tooltip": true,
 },
@@ -26,14 +25,14 @@
 
 "custom/file_manager": {
 	"format": " ",
-	"on-click": "$HOME/.config/hypr/scripts/WaybarScripts.sh --files",
+	"on-click": "hyprctl eval 'user.system.file_manager()'",
 	"tooltip": true,
 	"tooltip-format": "File Manager",
 },
 
 "custom/tty": {
 	"format": " ",
-	"on-click": "$HOME/.config/hypr/scripts/WaybarScripts.sh --term",
+	"on-click": "hyprctl eval 'user.system.terminal()'",
 	"tooltip": true,
 	"tooltip-format": "Launch Terminal",
 },
@@ -54,17 +53,17 @@
 
 "custom/cycle_wall": {
 	"format": " ",
-	"on-click": "$HOME/.config/hypr/UserScripts/WallpaperSelect.sh",
-	"on-click-right": "$HOME/.config/hypr/UserScripts/WallpaperRandom.sh",
-	"on-click-middle": "$HOME/.config/hypr/scripts/WaybarStyles.sh",
+	"on-click": "hyprctl eval 'user.wallpaper.select()'",
+	"on-click-right": "hyprctl eval 'user.wallpaper.random()'",
+	"on-click-middle": "hyprctl eval 'user.waybar.select_style()'",
 	"tooltip": true,
 	"tooltip-format": "Left Click: Wallpaper Menu\nMiddle Click: Random wallpaper\nRight Click: Waybar Styles Menu",
 },
 
 "custom/hint": {
 	"format": "󰺁 HINT!",
-	"on-click": "$HOME/.config/hypr/scripts/KeyHints.sh",
-	"on-click-right": "$HOME/.config/hypr/scripts/KeyBinds.sh",
+	"on-click": "hyprctl eval 'user.session.show_hints()'",
+	"on-click-right": "hyprctl eval 'user.session.show_binds()'",
 	"tooltip": true,
 	"tooltip-format": "Left Click: Quick Tips\nRight Click: Keybinds",
 },
@@ -83,8 +82,8 @@
 	"escape": true,
 	"exec-on-event": true,
 	"interval": 60,
-	"exec": "$HOME/.config/hypr/scripts/Hypridle.sh status",
-	"on-click": "$HOME/.config/hypr/scripts/Hypridle.sh toggle",
+	"exec": "hyprctl eval 'user.system.idle_inhibit_status()'",
+	"on-click": "hyprctl eval 'user.system.idle_inhibit_toggle()'",
 	"on-click-right": "hyprlock"
 },
 
@@ -92,26 +91,17 @@
 	"exec": "cat $HOME/.cache/kb_layout",
 	"interval": 1,
 	"format": " {}",
-	"on-click": "$HOME/.config/hypr/scripts/SwitchKeyboardLayout.sh",
-},
-
-"custom/light_dark": {
-	"format": "󰔎 ",
-	"on-click": "$HOME/.config/hypr/scripts/DarkLight.sh",
-	"on-click-right": "$HOME/.config/hypr/scripts/WaybarStyles.sh",
-	"on-click-middle": "$HOME/.config/hypr/UserScripts/WallpaperSelect.sh",
-	"tooltip": true,
-	"tooltip-format": "Left Click: Switch Dark-Light Themes\nMiddle Click: Wallpaper Menu\nRight Click: Waybar Styles Menu",
+	"on-click": "hyprctl eval 'user.input.switch_layout()'",
 },
 
 // Night light (Hyprsunset)
 "custom/nightlight": {
 	"return-type": "json",
-	"exec": "$HOME/.config/hypr/scripts/Hyprsunset.sh status",
+	"exec": "hyprctl eval 'user.display.nightlight_status()'",
 	"interval": 3,
 	"format": "{text}",
 	"min-length": 2,
-	"on-click": "$HOME/.config/hypr/scripts/Hyprsunset.sh toggle",
+	"on-click": "hyprctl eval 'user.display.nightlight_toggle()'",
 	"tooltip": true,
 	"tooltip-format": "Night light toggle",
 	"escape": false
@@ -119,7 +109,7 @@
 
 "custom/lock": {
 	"format": "󰌾",
-	"on-click": "$HOME/.config/hypr/scripts/LockScreen.sh",
+	"on-click": "hyprctl eval 'user.session.lock()'",
 	"tooltip": true,
 	"tooltip-format": "󰷛 Screen Lock",
 },
@@ -127,8 +117,8 @@
 "custom/menu": {
 	"format": "  ",
 	"on-click": "pkill rofi || rofi -show drun -modi run,drun,filebrowser,window",
-	"on-click-middle": "$HOME/.config/hypr/UserScripts/WallpaperSelect.sh",
-	"on-click-right": "$HOME/.config/hypr/scripts/WaybarLayout.sh",
+	"on-click-middle": "hyprctl eval 'user.wallpaper.select()'",
+	"on-click-right": "hyprctl eval 'user.waybar.select_layout()'",
 	"tooltip": true,
 	"tooltip-format": "Left Click: Rofi Menu\nMiddle Click: Wallpaper Menu\nRight Click: Waybar Layout Menu",
 },
@@ -147,15 +137,15 @@
 	"on-click": "playerctl previous",
 	"on-click-right": "playerctl next",
 	"scroll-step": 5.0,
-	"on-scroll-up": "$HOME/.config/hypr/scripts/Volume.sh --inc",
-	"on-scroll-down": "$HOME/.config/hypr/scripts/Volume.sh --dec",
+	"on-scroll-up": "hyprctl eval 'user.audio.volume_up()'",
+	"on-scroll-down": "hyprctl eval 'user.audio.volume_down()'",
 	"smooth-scrolling-threshold": 1,
 },
     
 "custom/power": {
 	"format": " ⏻ ",
-	"on-click": "$HOME/.config/hypr/scripts/Wlogout.sh",
-	"on-click-right": "$HOME/.config/hypr/scripts/ChangeBlur.sh",
+	"on-click": "hyprctl eval 'user.session.logout()'",
+	"on-click-right": "hyprctl eval 'user.display.blur_toggle()'",
 	"tooltip": true,
 	"tooltip-format": "Left Click: Logout Menu\nRight Click: Change Blur",
 },

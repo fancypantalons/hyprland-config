@@ -64,11 +64,11 @@
           "actions": [
               {
                   "label": "󰐥",
-                  "command": "bash -c $HOME/.config/hypr/scripts/Wlogout.sh"
+                  "command": "hyprctl eval 'user.session.logout()'"
               },
               {
                   "label": "󰌾",
-                  "command": "bash -c $HOME/.config/hypr/scripts/LockScreen.sh"
+                  "command": "hyprctl eval 'user.session.lock()'"
               },
               {
                   "label": "󰍃",
@@ -76,11 +76,11 @@
               },
               {
                   "label": "󰀝",
-                  "command": "bash -c $HOME/.config/hypr/scripts/AirplaneMode.sh"
+                  "command": "hyprctl eval 'user.system.airplane_mode()'"
               },
               {
                   "label": "󰝟",
-                  "command": "pactl set-sink-mute @DEFAULT_SINK@ toggle"
+                  "command": "hyprctl eval 'user.audio.volume_toggle()'"
               },
               {
                   "label": "󰂯",

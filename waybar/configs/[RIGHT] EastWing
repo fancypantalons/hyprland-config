@@ -24,7 +24,6 @@
 	
 "modules-left": [
 	"clock#vertical",
-	"custom/light_dark",
 ],
 
 "modules-center": [

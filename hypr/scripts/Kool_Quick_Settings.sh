@@ -17,7 +17,7 @@ rofi_theme="$HOME/.config/rofi/config-edit.rasi"
 msg=' ⁉️ Choose what to do ⁉️'
 iDIR="$HOME/.config/swaync/images"
 scriptsDir="$HOME/.config/hypr/scripts"
-UserScripts="$HOME/.config/hypr/UserScripts"
+UserScripts="$HOME/.config/hypr/scripts"
 
 # Function to display the menu options without numbers
 menu() {
@@ -32,7 +32,6 @@ view/edit Decorations
 view/edit Animations
 view/edit Laptop Keybinds
 view/edit Default Keybinds
-Choose Kitty Terminal Theme
 Configure Monitors (nwg-displays)
 Configure Workspace Rules (nwg-displays)
 GTK Settings (nwg-look)
@@ -43,7 +42,6 @@ Choose Monitor Profiles
 Choose Rofi Themes
 Search for Keybinds
 Toggle Game Mode
-Switch Dark-Light Theme
 EOF
 }
 
@@ -63,7 +61,6 @@ main() {
         "view/edit Animations") file="$UserConfigs/UserAnimations.conf" ;;
         "view/edit Laptop Keybinds") file="$UserConfigs/Laptops.conf" ;;
         "view/edit Default Keybinds") file="$configs/Keybinds.conf" ;;
-        "Choose Kitty Terminal Theme") $scriptsDir/Kitty_themes.sh ;;
         "Configure Monitors (nwg-displays)") 
             if ! command -v nwg-displays &>/dev/null; then
                 notify-send -i "$iDIR/error.png" "E-R-R-O-R" "Install nwg-displays first"
@@ -99,7 +96,6 @@ main() {
         "Choose Rofi Themes") $scriptsDir/RofiThemeSelector.sh ;;
         "Search for Keybinds") $scriptsDir/KeyBinds.sh ;;
         "Toggle Game Mode") $scriptsDir/GameMode.sh ;;
-        "Switch Dark-Light Theme") $scriptsDir/DarkLight.sh ;;
         *) return ;;  # Do nothing for invalid choices
     esac
 
