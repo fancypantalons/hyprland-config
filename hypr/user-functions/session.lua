@@ -16,9 +16,13 @@ local notify = require("utils.notify")
 
 local ICON_DIR = os.getenv("HOME") .. "/.config/swaync/icons"
 local IMAGE_DIR = os.getenv("HOME") .. "/.config/swaync/images"
-local SCRIPT_DIR = os.getenv("HOME") .. "/.config/hypr/scripts"
-local CONFIG_DIR = os.getenv("HOME") .. "/.config/hypr"
-local ROFI_DIR = os.getenv("HOME") .. "/.config/rofi"
+local ROFI_DIR  = os.getenv("HOME") .. "/.config/rofi"
+
+local SOUND_DIRS = {
+    "/run/current-system/sw/share/sounds/freedesktop/stereo",
+    "/usr/share/sounds/freedesktop/stereo",
+    os.getenv("HOME") .. "/.local/share/sounds/freedesktop/stereo",
+}
 
 local ICON_PICTURE = ICON_DIR .. "/picture.png"
 local ICON_NOTE = IMAGE_DIR .. "/note.png"
@@ -96,17 +100,20 @@ local function generate_active_window_filename(class)
     return string.format("Screenshot_%s_%s.png", time_str, class)
 end
 
----Play screenshot sound effect
--- Uses the Sounds.sh script
-local function play_screenshot_sound()
-    hl.exec_cmd(SCRIPT_DIR .. "/Sounds.sh --screenshot")
+---Find and play a freedesktop sound by glob pattern.
+-- Searches SOUND_DIRS in order and plays the first match via pw-play or paplay.
+-- Fully async — no blocking exec needed since we don't use the return value.
+-- @param pattern string Shell glob for the filename, e.g. "screen-capture.*"
+local function play_sound(pattern)
+    local dirs = table.concat(SOUND_DIRS, " ")
+    hl.exec_cmd(string.format(
+        [[for d in %s; do f=$(ls "$d"/%s 2>/dev/null | head -1); [ -n "$f" ] && { pw-play "$f" 2>/dev/null || paplay "$f" 2>/dev/null; break; }; done]],
+        dirs, pattern
+    ))
 end
 
----Play error sound effect
--- Uses the Sounds.sh script
-local function play_error_sound()
-    hl.exec_cmd(SCRIPT_DIR .. "/Sounds.sh --error")
-end
+local function play_screenshot_sound() play_sound("screen-capture.*") end
+local function play_error_sound()      play_sound("dialog-error.*")    end
 
 ---Show countdown notification
 -- Displays a notification counting down from the specified seconds

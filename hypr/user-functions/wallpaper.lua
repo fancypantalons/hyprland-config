@@ -514,46 +514,6 @@ notify-send -i "%s" "SDDM" "Background SET"
     hl.exec_cmd("kitty -e bash '" .. tmp_script .. "' &")
 end
 
----Modify Startup_Apps.conf for video vs image wallpaper
--- Updates the startup config to use appropriate daemon
--- @param selected_file string The selected wallpaper path
-local function modify_startup_config(selected_file)
-    local notify = require("utils.notify")
-
-    if not selected_file then
-        return
-    end
-
-    if (is_video(selected_file)) then
-        hl.exec_cmd(string.format(
-            "sed -i '/^\\s*exec-once\\s*=\\s*swww-daemon\\s*--format\\s*xrgb\\s*$/s/^/#/' '%s'",
-            PATHS.startup_config
-        ))
-
-        hl.exec_cmd(string.format(
-            "sed -i '/^\\s*#\\s*exec-once\\s*=\\s*mpvpaper\\s*.*/s/^#\\s*//;' '%s'",
-            PATHS.startup_config
-        ))
-
-        local escaped_path = selected_file:gsub(HOME, "$HOME")
-
-        hl.exec_cmd(string.format(
-            "sed -i 's|^\\$livewallpaper=.*|\\$livewallpaper=\"%s\"|' '%s'",
-            escaped_path,
-            PATHS.startup_config
-        ))
-    else
-        hl.exec_cmd(string.format(
-            "sed -i '/^\\s*#\\s*exec-once\\s*=\\s*swww-daemon\\s*--format\\s*xrgb\\s*$/s/^#\\s*//;' '%s'",
-            PATHS.startup_config
-        ))
-
-        hl.exec_cmd(string.format(
-            "sed -i '/^\\s*exec-once\\s*=\\s*mpvpaper\\s*.*/s/^/#/' '%s'",
-            PATHS.startup_config
-        ))
-    end
-end
 
 ---Get the current wallpaper path from swww cache
 -- @return string|nil The current wallpaper path
@@ -652,9 +612,8 @@ function wallpaper.select()
 
         local selected_file = find_result.stdout:gsub("%s+$", "")
 
-        modify_startup_config(selected_file)
-
         if (is_video(selected_file)) then
+            notify.info("Video wallpaper active this session only — update autostart.lua to persist across restarts")
             apply_video_wallpaper(selected_file)
         else
             apply_image_wallpaper(selected_file, focused_monitor)

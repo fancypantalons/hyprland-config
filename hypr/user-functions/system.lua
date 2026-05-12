@@ -274,7 +274,7 @@ function system.idle_inhibit_toggle()
             local kill_result = helpers.exec("pkill -x hypridle")
 
             if kill_result.success then
-                notify_system("Idle Inhibitor", "Activated (screen won't lock)")
+                notify_system("Screen auto-lock", "Disabled — screen won't lock")
             else
                 notify_error("Failed to stop hypridle")
             end
@@ -282,7 +282,7 @@ function system.idle_inhibit_toggle()
             local start_result = helpers.exec("hypridle")
 
             if start_result.success then
-                notify_system("Idle Inhibitor", "Deactivated (screen will lock)")
+                notify_system("Screen auto-lock", "Enabled — screen will lock when idle")
             else
                 notify_error("Failed to start hypridle")
             end
@@ -304,9 +304,9 @@ function system.idle_inhibit_status()
         local is_running = check_result.success
 
         if is_running then
-            return '{"text": "RUNNING", "class": "active", "tooltip": "idle_inhibitor NOT ACTIVE\nLeft Click: Activate\nRight Click: Lock Screen"}'
+            return '{"text": "RUNNING", "class": "active", "tooltip": "Screen auto-lock: ON\nLeft Click: Disable auto-lock\nRight Click: Lock now"}'
         else
-            return '{"text": "NOT RUNNING", "class": "notactive", "tooltip": "idle_inhibitor is ACTIVE\nLeft Click: Deactivate\nRight Click: Lock Screen"}'
+            return '{"text": "NOT RUNNING", "class": "notactive", "tooltip": "Screen auto-lock: OFF\nLeft Click: Enable auto-lock\nRight Click: Lock now"}'
         end
     end)
 
