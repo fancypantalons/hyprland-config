@@ -93,4 +93,62 @@ function helpers.exec(cmd)
     return result
 end
 
+---Decode an XKB modifier bitmask into an ordered list of modifier name strings.
+-- Recognises Super(64), Ctrl(4), Shift(1), and Alt/Mod1(8).
+-- Other bits (Lock, NumLock, Mod3, Mod5) are ignored.
+-- @param modmask number The raw modifier bitmask from hyprctl
+-- @return table Array of modifier name strings in display order
+local function decode_modmask(modmask)
+    local mods = {}
+    if (modmask & 64) ~= 0 then table.insert(mods, "SUPER") end
+    if (modmask & 4)  ~= 0 then table.insert(mods, "CTRL")  end
+    if (modmask & 1)  ~= 0 then table.insert(mods, "SHIFT") end
+    if (modmask & 8)  ~= 0 then table.insert(mods, "ALT")   end
+    return mods
+end
+
+---Retrieve the currently active global keybindings from Hyprland.
+-- Shells out to hyprctl and jq to get the live bind list, then decodes each
+-- entry into a structured Lua table. Only global binds are returned — submap,
+-- mouse, and catchall entries are excluded.
+--
+-- Each returned record has:
+--   keys        string  Human-readable key combo, e.g. "SUPER + SHIFT + S"
+--   description string  The bind's description flag (may be "")
+--   dispatcher  string  The internal dispatcher name, e.g. "exec", "closewindow"
+--   arg         string  The dispatcher argument (may be "")
+--
+-- @return table Array of bind record tables (empty on error or if jq is absent)
+function helpers.get_binds()
+    local filter = '.[] | select(.submap == "" and .catchall == false and .mouse == false)'
+                .. ' | [.modmask | tostring, .key, .description, .dispatcher, .arg] | @tsv'
+
+    local result = helpers.exec(string.format("hyprctl binds -j | jq -r '%s'", filter))
+
+    if not result.success or result.stdout == "" then
+        return {}
+    end
+
+    local binds = {}
+
+    for line in result.stdout:gmatch("[^\r\n]+") do
+        local modmask_s, key, description, dispatcher, arg =
+            line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t?(.*)")
+
+        if key and key ~= "" then
+            local mods = decode_modmask(tonumber(modmask_s) or 0)
+            table.insert(mods, key)
+
+            table.insert(binds, {
+                keys        = table.concat(mods, " + "),
+                description = description or "",
+                dispatcher  = dispatcher  or "",
+                arg         = arg         or "",
+            })
+        end
+    end
+
+    return binds
+end
+
 return helpers

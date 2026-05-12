@@ -568,43 +568,60 @@ end
 -- ============================================
 
 ---Show searchable keybinds with rofi
--- Kills yad first, parses binds from config files, shows in rofi
+-- Retrieves the live bind list from Hyprland via helpers.get_binds(), formats
+-- each entry as "keys   label" where label is the bind's description when set,
+-- or "dispatcher: arg" as a fallback.  Binds with neither are omitted.
 -- @function show_binds
 function session.show_binds()
     local success, err = pcall(function()
-        -- Kill yad
         hl.exec_cmd("pkill -x yad 2>/dev/null || true")
-
-        -- Kill existing rofi
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
 
-        -- Define config files
-        local keybinds_conf = CONFIG_DIR .. "/configs/Keybinds.conf"
-        local user_keybinds_conf = CONFIG_DIR .. "/UserConfigs/UserKeybinds.conf"
-        local laptop_conf = CONFIG_DIR .. "/UserConfigs/Laptops.conf"
-        local rofi_theme = ROFI_DIR .. "/config-keybinds.rasi"
-        local msg = "☣️ NOTE ☣️: Clicking with Mouse or Pressing ENTER will have NO function"
+        local binds = helpers.get_binds()
 
-        -- Build the command to collect keybinds
-        local keybinds_cmd = string.format("cat %s %s 2>/dev/null | grep -E '^bind'", keybinds_conf, user_keybinds_conf)
-
-        -- Check if laptop.conf exists and add its binds
-        local laptop_check = helpers.exec("test -f " .. laptop_conf)
-
-        if laptop_check.success then
-            keybinds_cmd = keybinds_cmd .. string.format("; grep -E '^bind' %s 2>/dev/null", laptop_conf)
+        if #binds == 0 then
+            local notify = require("utils.notify")
+            notify.error("No keybinds found", "Is hyprctl / jq installed?")
+            return
         end
 
-        -- Replace $mainMod with SUPER for display
-        keybinds_cmd = keybinds_cmd .. " | sed 's/\\$mainMod/SUPER/g'"
+        local lines = {}
+        local msg = "☣️ NOTE ☣️: Clicking with Mouse or Pressing ENTER will have NO function"
 
-        -- Launch rofi
-        local rofi_cmd = string.format("%s | rofi -dmenu -i -config %s -mesg '%s' &", keybinds_cmd, rofi_theme, msg)
+        for _, bind in ipairs(binds) do
+            local label
+
+            if bind.description ~= "" then
+                label = bind.description
+            elseif bind.dispatcher ~= "" then
+                label = bind.arg ~= "" and (bind.dispatcher .. ": " .. bind.arg)
+                                       or bind.dispatcher
+            end
+
+            if label then
+                table.insert(lines, string.format("%-36s  %s", bind.keys, label))
+            end
+        end
+
+        if #lines == 0 then
+            local notify = require("utils.notify")
+            notify.error("No displayable keybinds found")
+            return
+        end
+
+        local menu_input = table.concat(lines, "\n")
+        local rofi_theme = ROFI_DIR .. "/config-keybinds.rasi"
+        local rofi_cmd = string.format(
+            "echo '%s' | rofi -dmenu -i -config %s -mesg '%s' &",
+            menu_input:gsub("'", "'\"'\"'"),
+            rofi_theme,
+            msg
+        )
 
         hl.exec_cmd(rofi_cmd)
     end)
 
-    if (not success) then
+    if not success then
         local notify = require("utils.notify")
         notify.error("Key binds failed", tostring(err))
     end
