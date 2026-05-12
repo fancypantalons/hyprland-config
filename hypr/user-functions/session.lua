@@ -496,9 +496,14 @@ end
 -- @function show_hints
 function session.show_hints()
     local success, err = pcall(function()
-        -- Kill existing rofi/yad
+        -- Toggle: kill yad if it's already open, otherwise launch it
+        local check = helpers.exec("pgrep -x yad")
+        if check.stdout ~= "" then
+            hl.exec_cmd("pkill -x yad")
+            return
+        end
+
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
-        hl.exec_cmd("pkill -x yad 2>/dev/null || true")
 
         -- Launch yad with cheat sheet
         local yad_cmd = [[GDK_BACKEND=wayland yad \
@@ -511,7 +516,6 @@ function session.show_hints()
             --column=Key: \
             --column=Description: \
             --column=Command: \
-            --timeout-indicator=bottom \
             "ESC" "close this app" "" \
             " = " "SUPER KEY (Windows Key Button)" "(SUPER KEY)" \
             " SHIFT K" "Searchable Keybinds" "(Search all Keybinds via rofi)" \
