@@ -2,7 +2,7 @@
 -- This file is overwritten by wallust when it runs
 -- Current colors from wallust-hyprland.conf
 
-colors = {
+local colors = {
   background = "rgb(04000F)",
   foreground = "rgb(F4EAE0)",
   color0 = "rgb(04000F)",

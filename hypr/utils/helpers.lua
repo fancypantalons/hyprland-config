@@ -89,6 +89,7 @@ function helpers.exec(cmd)
     -- Lua 5.2+: close() returns ok, reason, code. Treat exit 0 (or true) as success.
     local ok, _, code = p:close()
     result.success = (ok == true) or (code == 0)
+    result.exit_code = code
 
     return result
 end

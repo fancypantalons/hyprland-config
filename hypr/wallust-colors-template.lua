@@ -2,7 +2,7 @@
 -- This file is used by wallust as a template
 -- wallust replaces {{colorN}} placeholders with actual colors
 
-colors = {
+local colors = {
   background = "rgb({{background | strip}})",
   foreground = "rgb({{foreground | strip}})",
   color0 = "rgb({{color0 | strip}})",

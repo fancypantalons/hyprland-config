@@ -236,9 +236,9 @@ local function calculate_margins(height, scale)
         base_t, base_b = 200, 200
     end
 
-    -- Adjust for resolution and scale
-    local t_val = math.floor(base_t * height * scale / height)
-    local b_val = math.floor(base_b * height * scale / height)
+    -- Adjust for scale: shrink margins on HiDPI
+    local t_val = math.floor(base_t / scale)
+    local b_val = math.floor(base_b / scale)
 
     return t_val, b_val
 end

@@ -30,7 +30,6 @@ local PATHS = {
     wallpaper_modified = HOME .. "/.config/hypr/wallpaper_effects/.wallpaper_modified",
     gif_cache = HOME .. "/.cache/gif_preview",
     video_cache = HOME .. "/.cache/video_preview",
-    startup_config = HOME .. "/.config/hypr/UserConfigs/Startup_Apps.conf",
     scripts_dir = HOME .. "/.config/hypr/scripts",
     rofi_theme = HOME .. "/.config/rofi/config-wallpaper.rasi",
     rofi_effect_theme = HOME .. "/.config/rofi/config-wallpaper-effect.rasi",
@@ -255,6 +254,8 @@ end
 ---Apply an image wallpaper using swww
 -- @param image_path string Path to the image file
 -- @param monitor string The monitor to apply to (uses focused if nil)
+local offer_sddm_wallpaper
+local set_sddm_wallpaper
 local function apply_image_wallpaper(image_path, monitor)
     local notify = require("utils.notify")
     local target_monitor = monitor or get_focused_monitor()
@@ -327,7 +328,7 @@ end
 ---Offer to set wallpaper as SDDM background
 -- Shows a yad dialog if simple_sddm_2 theme exists
 -- @param is_effect boolean Whether this is an effect wallpaper
-local function offer_sddm_wallpaper(is_effect)
+offer_sddm_wallpaper = function(is_effect)
     local notify = require("utils.notify")
 
     local sddm_dir = nil
@@ -384,7 +385,7 @@ end
 -- Handles NixOS detection (skips on NixOS)
 -- Launches kitty with sudo commands for privileged operations
 -- @param mode string Either "normal" or "effects" to determine which wallpaper to use
-local function set_sddm_wallpaper(mode)
+set_sddm_wallpaper = function(mode)
     local notify = require("utils.notify")
 
     local sddm_dir = nil

@@ -125,7 +125,7 @@ local function touchpad_enable()
         return false
     end
 
-    hl.config.env["TOUCHPAD_ENABLED"] = "true"
+    hl.device({ name = "asue1209:00-04f3:319f-touchpad", enabled = true })
     notify_system("Touchpad", "Enabled")
 
     return true
@@ -139,7 +139,7 @@ local function touchpad_disable()
         return false
     end
 
-    hl.config.env["TOUCHPAD_ENABLED"] = "false"
+    hl.device({ name = "asue1209:00-04f3:319f-touchpad", enabled = false })
     notify_system("Touchpad", "Disabled")
 
     return true

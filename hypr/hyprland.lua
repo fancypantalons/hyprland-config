@@ -9,10 +9,8 @@ configDir = os.getenv("HOME") .. "/.config/hypr"
 -- Based on monitors.conf
 -- ============================================
 
--- Default monitor configurations
-hl.monitor({ output = ",", mode = "preferred", position = "auto", scale = 1 })
-hl.monitor({ output = ",", mode = "highrr", position = "auto", scale = 1 })
-hl.monitor({ output = ",", mode = "highres", position = "auto", scale = 1.5 })
+-- Default fallback for any unconfigured monitor
+hl.monitor({ output = "", mode = "preferred", position = "auto", scale = 1 })
 
 -- Integrated laptop monitor
 hl.monitor({

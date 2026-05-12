@@ -14,7 +14,6 @@ local notify = require("utils.notify")
 -- CONFIGURATION
 -- ============================================
 
-local SETTINGS_FILE = os.getenv("HOME") .. "/.config/hypr/UserConfigs/UserSettings.conf"
 local LAYOUT_CACHE_FILE = os.getenv("HOME") .. "/.cache/kb_layout"
 local NOTIF_ICON = os.getenv("HOME") .. "/.config/swaync/images/ja.png"
 
@@ -33,18 +32,10 @@ local IGNORE_PATTERNS = {
 -- @return table Array of layout codes (e.g., {"us", "de", "fr"})
 -- @return string|nil Error message if failed
 local function read_configured_layouts()
-    local result = helpers.exec(string.format("grep 'kb_layout = ' %s 2>/dev/null || echo ''", SETTINGS_FILE))
+    local layouts_str = hl.get_config("input.kb_layout")
 
-    if not result.success or result.stdout == "" then
-        return nil, "Could not read kb_layout from settings file"
-    end
-
-    -- Extract layouts from "kb_layout = us,de,fr"
-    local layout_line = result.stdout:gsub("%s+$", "")
-    local layouts_str = layout_line:match("kb_layout%s*=%s*(.+)$")
-
-    if not layouts_str then
-        return nil, "Could not parse kb_layout line"
+    if (not layouts_str) or (layouts_str == "") then
+        return nil, "Could not read kb_layout from Hyprland"
     end
 
     -- Remove whitespace and split by comma

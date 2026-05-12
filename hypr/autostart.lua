@@ -7,7 +7,9 @@ hl.on("hyprland.start", function()
   hl.exec_cmd("tmux setenv -g HYPRLAND_INSTANCE_SIGNATURE \"" .. os.getenv("HYPRLAND_INSTANCE_SIGNATURE") .. "\"")
   
   -- Fire up an ssh agent
-  hl.exec_cmd("ssh-agent -D -a " .. os.getenv("SSH_AUTH_SOCK"))
+  local sock = os.getenv("SSH_AUTH_SOCK")
+      or ("/run/user/" .. (os.getenv("UID") or "1000") .. "/ssh-agent.sock")
+  hl.exec_cmd("ssh-agent -D -a " .. sock)
   
   -- Wallpaper stuff
   hl.exec_cmd("swww-daemon --format xrgb")
@@ -41,5 +43,5 @@ hl.on("hyprland.start", function()
   hl.exec_cmd("hypridle")
   
   -- Special workspace for keepassxc
-  hl.exec_cmd("keepassxc", { workspace = "special:keepassxc", silent = true })
+  hl.exec_cmd("keepassxc", { workspace = "special:keepassxc" })
 end)
