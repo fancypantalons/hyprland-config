@@ -97,7 +97,7 @@
 // Night light (Hyprsunset)
 "custom/nightlight": {
 	"return-type": "json",
-	"exec": "hyprctl eval 'user.display.nightlight_status()'",
+	"exec": "$HOME/.config/hypr/scripts/nightlight-status.sh",
 	"interval": 3,
 	"format": "{text}",
 	"min-length": 2,

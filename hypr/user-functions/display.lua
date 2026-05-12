@@ -45,30 +45,17 @@ local NIGHTLIGHT_TEMP = 4500
 -- @return number|nil The current brightness level (0-100), or nil on error
 -- @return string|nil Error message if command failed
 local function get_brightness()
-    local result = helpers.exec("brightnessctl -m | cut -d, -f4 | tr -d '%'")
-
-    if not result.success then
-        return nil, result.stderr or "Failed to get brightness"
-    end
-
-    local brightness = tonumber(result.stdout:match("%d+"))
-
-    return brightness
+    -- Use -m (machine-readable CSV) and parse in Lua to avoid shell pipeline exit codes
+    -- Output format: device,type,value,percent%,max
+    local result = helpers.exec("brightnessctl -m")
+    return tonumber(result.stdout:match(",(%d+)%%,"))
 end
 
 ---Get the current keyboard backlight brightness
 -- @return number|nil The current keyboard brightness level (0-100), or nil on error
--- @return string|nil Error message if command failed
 local function get_kbd_brightness()
-    local result = helpers.exec("brightnessctl -d '*::kbd_backlight' -m | cut -d, -f4 | tr -d '%'")
-
-    if not result.success then
-        return nil, result.stderr or "Failed to get keyboard brightness"
-    end
-
-    local brightness = tonumber(result.stdout:match("%d+"))
-
-    return brightness
+    local result = helpers.exec("brightnessctl -d '*::kbd_backlight' -m")
+    return tonumber(result.stdout:match(",(%d+)%%,"))
 end
 
 ---Get the appropriate brightness icon based on brightness level

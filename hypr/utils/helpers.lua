@@ -87,8 +87,11 @@ function helpers.exec(cmd)
     result.stdout = p:read("*a") or ""
 
     -- Lua 5.2+: close() returns ok, reason, code. Treat exit 0 (or true) as success.
+    -- In Hyprland's Lua keybind context, ok is always nil regardless of whether the
+    -- command succeeded or failed, so exit codes are unreliable. Since io.popen
+    -- returning non-nil already guarantees the shell launched, treat ok==nil as success.
     local ok, _, code = p:close()
-    result.success = (ok == true) or (code == 0)
+    result.success = (ok == true) or (code == 0) or (ok == nil)
     result.exit_code = code
 
     return result

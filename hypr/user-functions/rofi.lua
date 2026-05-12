@@ -2024,7 +2024,7 @@ end
 ---Get list of local music files
 -- @return table Array of file paths
 local function get_local_music_files()
-    local result = helpers.exec("find -L " .. MUSIC_DIR .. " -type f \( -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.ogg' -o -iname '*.mp4' \) 2>/dev/null")
+    local result = helpers.exec("find -L " .. MUSIC_DIR .. " -type f \\( -iname '*.mp3' -o -iname '*.flac' -o -iname '*.wav' -o -iname '*.ogg' -o -iname '*.mp4' \\) 2>/dev/null")
     local files = {}
 
     if (not result.success or result.stdout == nil or result.stdout == "") then

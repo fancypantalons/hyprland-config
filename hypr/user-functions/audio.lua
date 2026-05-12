@@ -41,39 +41,20 @@ local ICONS = {
 -- @return string|nil Error message if command failed
 local function get_volume()
     local result = helpers.exec("pamixer --get-volume")
-
-    if not result.success then
-        return nil, result.stderr or "Failed to get volume"
-    end
-
-    local volume = tonumber(result.stdout:match("%d+"))
-
-    return volume
+    return tonumber(result.stdout:match("%d+"))
 end
 
 ---Check if the volume is currently muted
 -- @return boolean|nil True if muted, false if not, nil on error
--- @return string|nil Error message if command failed
 local function is_muted()
     local result = helpers.exec("pamixer --get-mute")
-
-    if not result.success then
-        return nil, result.stderr or "Failed to get mute state"
-    end
-
     return result.stdout:match("true") ~= nil
 end
 
 ---Check if the microphone is currently muted
 -- @return boolean|nil True if muted, false if not, nil on error
--- @return string|nil Error message if command failed
 local function is_mic_muted()
     local result = helpers.exec("pamixer --default-source --get-mute")
-
-    if not result.success then
-        return nil, result.stderr or "Failed to get mic mute state"
-    end
-
     return result.stdout:match("true") ~= nil
 end
 

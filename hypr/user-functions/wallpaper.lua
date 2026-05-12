@@ -113,7 +113,7 @@ local function get_wallpaper_list()
     find_pattern = find_pattern:sub(5)
 
     local cmd = string.format(
-        "find -L '%s' -type f \( %s \) -print 2>/dev/null | sort",
+        "find -L '%s' -type f \\( %s \\) -print 2>/dev/null | sort",
         PATHS.wallpapers,
         find_pattern
     )
