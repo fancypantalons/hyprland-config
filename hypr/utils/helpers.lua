@@ -124,18 +124,16 @@ end
 --
 -- @return table Array of bind record tables (empty on error or if jq is absent)
 function helpers.get_binds()
-    local filter = '.[] | select(.submap == "" and .catchall == false and .mouse == false)'
-                .. ' | [.modmask | tostring, .key, .description, .dispatcher, .arg] | @tsv'
+    local cache_path = os.getenv("HOME") .. "/.cache/hypr/binds.tsv"
+    local data, err = helpers.read_file(cache_path)
 
-    local result = helpers.exec(string.format("hyprctl binds -j | jq -r '%s'", filter))
-
-    if not result.success or result.stdout == "" then
+    if not data or data == "" then
         return {}
     end
 
     local binds = {}
 
-    for line in result.stdout:gmatch("[^\r\n]+") do
+    for line in data:gmatch("[^\r\n]+") do
         local modmask_s, key, description, dispatcher, arg =
             line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t?(.*)")
 

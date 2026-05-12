@@ -491,8 +491,18 @@ end
 -- KEY HINTS
 -- ============================================
 
+---Shell-quote a string for safe use as a command-line argument.
+-- Wraps in single quotes, escaping any embedded single quotes.
+-- @param s string
+-- @return string
+local function shell_quote(s)
+    return "'" .. s:gsub("'", "'\"'\"'") .. "'"
+end
+
 ---Show key hints with yad
--- Kills existing rofi/yad first, then launches yad with cheat sheet
+-- Kills existing rofi/yad first, then launches yad with live bind list.
+-- Reads the cached binds file (populated by autostart/reload hooks) to avoid
+-- calling hyprctl from inside a keybind handler (which would deadlock).
 -- @function show_hints
 function session.show_hints()
     local success, err = pcall(function()
@@ -505,71 +515,47 @@ function session.show_hints()
 
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
 
-        -- Launch yad with cheat sheet
-        local yad_cmd = [[GDK_BACKEND=wayland yad \
-            --center \
-            --width=1000 \
-            --height=700 \
-            --title="KooL Quick Cheat Sheet" \
-            --no-buttons \
-            --list \
-            --column=Key: \
-            --column=Description: \
-            --column=Command: \
-            "ESC" "close this app" "" \
-            " = " "SUPER KEY (Windows Key Button)" "(SUPER KEY)" \
-            " SHIFT K" "Searchable Keybinds" "(Search all Keybinds via rofi)" \
-            " SHIFT E" "KooL Hyprland Settings Menu" "" \
-            "" "" "" \
-            " enter" "Terminal" "(kitty)" \
-            " SHIFT enter" "DropDown Terminal" " Q to close" \
-            " B" "Launch Browser" "(Default browser)" \
-            " A" "Desktop Overview" "(AGS - if opted to install)" \
-            " D" "Application Launcher" "(rofi-wayland)" \
-            " E" "Open File Manager" "(Thunar)" \
-            " S" "Google Search using rofi" "(rofi)" \
-            " Q" "close active window" "(not kill)" \
-            " Shift Q " "kills an active window" "(kill)" \
-            " ALT mouse scroll up/down   " "Desktop Zoom" "Desktop Magnifier" \
-            " Alt V" "Clipboard Manager" "(cliphist)" \
-            " W" "Choose wallpaper" "(Wallpaper Menu)" \
-            " Shift W" "Choose wallpaper effects" "(imagemagick + swww)" \
-            "CTRL ALT W" "Random wallpaper" "(via swww)" \
-            " CTRL ALT B" "Hide/UnHide Waybar" "waybar" \
-            " CTRL B" "Choose waybar styles" "(waybar styles)" \
-            " ALT B" "Choose waybar layout" "(waybar layout)" \
-            " ALT R" "Reload Waybar swaync Rofi" "CHECK NOTIFICATION FIRST!!!" \
-            " SHIFT N" "Launch Notification Panel" "swaync Notification Center" \
-            " Print" "screenshot" "(grim)" \
-            " Shift Print" "screenshot region" "(grim + slurp)" \
-            " Shift S" "screenshot region" "(swappy)" \
-            " CTRL Print" "screenshot timer 5 secs " "(grim)" \
-            " CTRL SHIFT Print" "screenshot timer 10 secs " "(grim)" \
-            "ALT Print" "Screenshot active window" "active window only" \
-            "CTRL ALT P" "power-menu" "(wlogout)" \
-            "CTRL ALT L" "screen lock" "(hyprlock)" \
-            "CTRL ALT Del" "Hyprland Exit" "(NOTE: Hyprland Will exit immediately)" \
-            " SHIFT F" "Fullscreen" "Toggles to full screen" \
-            " CTL F" "Fake Fullscreen" "Toggles to fake full screen" \
-            " ALT L" "Toggle Dwindle | Master Layout" "Hyprland Layout" \
-            " SPACEBAR" "Toggle float" "single window" \
-            " ALT SPACEBAR" "Toggle all windows to float" "all windows" \
-            " ALT O" "Toggle Blur" "normal or less blur" \
-            " CTRL O" "Toggle Opaque ON or OFF" "on active window only" \
-            " Shift A" "Animations Menu" "Choose Animations via rofi" \
-            " CTRL R" "Rofi Themes Menu" "Choose Rofi Themes via rofi" \
-            " CTRL Shift R" "Rofi Themes Menu v2" "Choose Rofi Themes via Theme Selector (modified)" \
-            " SHIFT G" "Gamemode! All animations OFF or ON" "toggle" \
-            " ALT E" "Rofi Emoticons" "Emoticon" \
-            " H" "Launch this Quick Cheat Sheet" "" \
-            "" "" "" \
-            "More tips:" "https://github.com/JaKooLit/Hyprland-Dots/wiki" ""]]
+        local binds = helpers.get_binds()
+
+        if #binds == 0 then
+            notify.error("No keybinds found", "Bind cache may not be populated yet")
+            return
+        end
+
+        -- Build yad args from live bind list
+        local yad_args = {}
+        for _, bind in ipairs(binds) do
+            local label
+            local detail
+
+            if bind.description ~= "" then
+                label = bind.description
+            elseif bind.dispatcher ~= "" then
+                label = bind.dispatcher
+            end
+
+            if bind.arg ~= "" then
+                detail = bind.arg
+            end
+
+            if label then
+                table.insert(yad_args, shell_quote(bind.keys))
+                table.insert(yad_args, shell_quote(label))
+            end
+        end
+
+        if #yad_args == 0 then
+            notify.error("No displayable keybinds found")
+            return
+        end
+
+        local yad_cmd = "GDK_BACKEND=wayland yad --center --width=1000 --height=700 --title='Keybind Cheat Sheet' --no-buttons --list --column=Key: --column=Description: "
+            .. table.concat(yad_args, " ")
 
         hl.exec_cmd(yad_cmd)
     end)
 
     if (not success) then
-        local notify = require("utils.notify")
         notify.error("Key hints failed", tostring(err))
     end
 end
@@ -592,7 +578,7 @@ function session.show_binds()
 
         if #binds == 0 then
             local notify = require("utils.notify")
-            notify.error("No keybinds found", "Is hyprctl / jq installed?")
+            notify.error("No keybinds found", "Bind cache may not be populated yet")
             return
         end
 

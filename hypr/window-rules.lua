@@ -59,10 +59,10 @@ hl.window_rule({
 
 -- KooL applications
 hl.window_rule({
-  match = { title = "^(KooL Quick Cheat Sheet)$" },
+  match = { title = "^(Keybind Cheat Sheet)$" },
   float = true,
   center = true,
-  size = "1200 800"
+  size = "600 800"
 })
 
 hl.window_rule({
