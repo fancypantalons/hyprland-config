@@ -73,12 +73,12 @@ end
 -- @function airplane_mode
 function system.airplane_mode()
     helpers.safe_call("Airplane mode toggle failed", function()
-        local result = helpers.exec("rfkill list wifi | grep 'Soft blocked: yes'")
+        local result = helpers.exec("/sbin/rfkill list wifi | grep 'Soft blocked: no'")
         local is_blocked = result.success and result.stdout ~= ""
         local toggle_result
 
         if is_blocked then
-            toggle_result = helpers.exec("rfkill unblock wifi")
+            toggle_result = helpers.exec("/sbin/rfkill unblock wifi")
 
             if toggle_result.success then
                 notify_system("Airplane Mode", "OFF")
@@ -88,7 +88,7 @@ function system.airplane_mode()
                 return
             end
         else
-            toggle_result = helpers.exec("rfkill block wifi")
+            toggle_result = helpers.exec("/sbin/rfkill block wifi")
 
             if toggle_result.success then
                 notify_system("Airplane Mode", "ON")
