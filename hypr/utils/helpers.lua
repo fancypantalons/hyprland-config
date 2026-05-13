@@ -96,21 +96,6 @@ function helpers.delay(seconds, cb)
     end)
 end
 
----Test exec_async callback mechanism. Sends a notification with exit code and output.
--- Run: hyprctl eval 'helpers.test_async()'
-function helpers.test_async()
-    helpers.exec_async(
-        "echo 'stdout works' && echo 'stderr works' >&2 && exit 42",
-        function(exit_code, output)
-            local f = io.open("/tmp/exec_async_test_result", "w")
-            if f then
-                f:write(string.format("exit=%d out=[%s]", exit_code, output:gsub("%s+$", "")))
-                f:close()
-            end
-        end
-    )
-end
-
 ---Pause execution for a specified number of seconds
 -- Uses os.execute to spawn a sleep command
 -- Note: This blocks the current Lua execution context
@@ -197,34 +182,32 @@ end
 --   arg         string  The dispatcher argument (may be "")
 --
 -- @return table Array of bind record tables (empty on error or if jq is absent)
-function helpers.get_binds()
-    local cache_path = os.getenv("HOME") .. "/.cache/hypr/binds.tsv"
-    local data, err = helpers.read_file(cache_path)
+function helpers.get_binds(cb)
+    helpers.exec_async(
+        "hyprctl binds -j | jq -r '.[] | select(.submap == \"\" and .catch_all == false and .mouse == false) | [(.modmask | tostring), .key, .description, .dispatcher, .arg] | @tsv'",
+        function(_, data)
+            local binds = {}
 
-    if not data or data == "" then
-        return {}
-    end
+            for line in data:gmatch("[^\r\n]+") do
+                local modmask_s, key, description, dispatcher, arg =
+                    line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t?(.*)")
 
-    local binds = {}
+                if key and key ~= "" then
+                    local mods = decode_modmask(tonumber(modmask_s) or 0)
+                    table.insert(mods, key)
 
-    for line in data:gmatch("[^\r\n]+") do
-        local modmask_s, key, description, dispatcher, arg =
-            line:match("^([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t?(.*)")
+                    table.insert(binds, {
+                        keys        = table.concat(mods, " + "),
+                        description = description or "",
+                        dispatcher  = dispatcher  or "",
+                        arg         = arg         or "",
+                    })
+                end
+            end
 
-        if key and key ~= "" then
-            local mods = decode_modmask(tonumber(modmask_s) or 0)
-            table.insert(mods, key)
-
-            table.insert(binds, {
-                keys        = table.concat(mods, " + "),
-                description = description or "",
-                dispatcher  = dispatcher  or "",
-                arg         = arg         or "",
-            })
+            cb(binds)         
         end
-    end
-
-    return binds
+    )
 end
 
 _G.helpers = helpers

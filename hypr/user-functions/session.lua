@@ -235,33 +235,36 @@ end
 -- Kills existing wlogout instance first
 -- @function logout
 function session.logout()
-    local success, err = pcall(function()
-        -- Kill existing wlogout
-        hl.exec_cmd("pkill -x wlogout 2>/dev/null || true")
-
-        -- Get monitor info
-        local height, scale = get_monitor_info()
-
-        -- Calculate margins
-        local t_val, b_val = calculate_margins(height, scale)
-
-        -- Launch wlogout with explicit config paths
-        local home = os.getenv("HOME")
-        local wlogout_cmd = string.format(
-            "wlogout --protocol layer-shell -b 6 -T %d -B %d -l '%s/.config/wlogout/layout' -s '%s/.config/wlogout/style.css' &",
-            t_val,
-            b_val,
-            home,
-            home
-        )
-
-        hl.exec_cmd(wlogout_cmd)
-    end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("Logout menu failed", tostring(err))
-    end
+    helpers.exec_async(
+        "pkill -x wlogout", 
+        function(_, _)
+            -- Get monitor info
+            local height, scale = get_monitor_info()
+  
+            -- Calculate margins
+            local t_val, b_val = calculate_margins(height, scale)
+  
+            -- Determine buttons per row: 3 for 2k and below (2 rows), 6 for higher resolutions (1 row)
+            local buttons_per_row = 6
+  
+            if (height <= 1600) then
+                buttons_per_row = 3
+            end
+  
+            -- Launch wlogout with explicit config paths
+            local home = os.getenv("HOME")
+            local wlogout_cmd = string.format(
+                "wlogout --protocol layer-shell -b %d -T %d -B %d -l '%s/.config/wlogout/layout' -C '%s/.config/wlogout/style.css' &",
+                buttons_per_row,
+                t_val,
+                b_val,
+                home,
+                home
+            )
+  
+            hl.exec_cmd(wlogout_cmd)
+        end
+    )
 end
 
 -- ============================================
@@ -467,6 +470,7 @@ function session.show_hints()
     local success, err = pcall(function()
         -- Toggle: kill yad if it's already open, otherwise launch it
         local check = helpers.exec("pgrep -x yad")
+
         if check.stdout ~= "" then
             hl.exec_cmd("pkill -x yad")
             return
@@ -474,44 +478,44 @@ function session.show_hints()
 
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
 
-        local binds = helpers.get_binds()
-
-        if #binds == 0 then
-            notify.error("No keybinds found", "Bind cache may not be populated yet")
-            return
-        end
-
-        -- Build yad args from live bind list
-        local yad_args = {}
-        for _, bind in ipairs(binds) do
-            local label
-            local detail
-
-            if bind.description ~= "" then
-                label = bind.description
-            elseif bind.dispatcher ~= "" then
-                label = bind.dispatcher
+        helpers.get_binds(function(binds)
+            if #binds == 0 then
+                notify.error("No keybinds found", "Bind cache may not be populated yet")
+                return
             end
 
-            if bind.arg ~= "" then
-                detail = bind.arg
+            -- Build yad args from live bind list
+            local yad_args = {}
+            for _, bind in ipairs(binds) do
+                local label
+                local detail
+
+                if bind.description ~= "" then
+                    label = bind.description
+                elseif bind.dispatcher ~= "" then
+                    label = bind.dispatcher
+                end
+
+                if bind.arg ~= "" then
+                    detail = bind.arg
+                end
+
+                if label then
+                    table.insert(yad_args, shell_quote(bind.keys))
+                    table.insert(yad_args, shell_quote(label))
+                end
             end
 
-            if label then
-                table.insert(yad_args, shell_quote(bind.keys))
-                table.insert(yad_args, shell_quote(label))
+            if #yad_args == 0 then
+                notify.error("No displayable keybinds found")
+                return
             end
-        end
 
-        if #yad_args == 0 then
-            notify.error("No displayable keybinds found")
-            return
-        end
+            local yad_cmd = "GDK_BACKEND=wayland yad --center --width=1000 --height=700 --title='Keybind Cheat Sheet' --no-buttons --list --column=Key: --column=Description: "
+                .. table.concat(yad_args, " ")
 
-        local yad_cmd = "GDK_BACKEND=wayland yad --center --width=1000 --height=700 --title='Keybind Cheat Sheet' --no-buttons --list --column=Key: --column=Description: "
-            .. table.concat(yad_args, " ")
-
-        hl.exec_cmd(yad_cmd)
+            hl.exec_cmd(yad_cmd)
+        end)
     end)
 
     if (not success) then
@@ -533,48 +537,48 @@ function session.show_binds()
         hl.exec_cmd("pkill -x yad 2>/dev/null || true")
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
 
-        local binds = helpers.get_binds()
-
-        if #binds == 0 then
-            local notify = require("utils.notify")
-            notify.error("No keybinds found", "Bind cache may not be populated yet")
-            return
-        end
-
-        local lines = {}
-        local msg = "☣️ NOTE ☣️: Clicking with Mouse or Pressing ENTER will have NO function"
-
-        for _, bind in ipairs(binds) do
-            local label
-
-            if bind.description ~= "" then
-                label = bind.description
-            elseif bind.dispatcher ~= "" then
-                label = bind.arg ~= "" and (bind.dispatcher .. ": " .. bind.arg)
-                                       or bind.dispatcher
+        helpers.get_binds(function(binds)
+            if #binds == 0 then
+                local notify = require("utils.notify")
+                notify.error("No keybinds found", "Bind cache may not be populated yet")
+                return
             end
 
-            if label then
-                table.insert(lines, string.format("%-36s  %s", bind.keys, label))
+            local lines = {}
+            local msg = "☣️ NOTE ☣️: Clicking with Mouse or Pressing ENTER will have NO function"
+
+            for _, bind in ipairs(binds) do
+                local label
+
+                if bind.description ~= "" then
+                    label = bind.description
+                elseif bind.dispatcher ~= "" then
+                    label = bind.arg ~= "" and (bind.dispatcher .. ": " .. bind.arg)
+                                           or bind.dispatcher
+                end
+
+                if label then
+                    table.insert(lines, string.format("%-36s  %s", bind.keys, label))
+                end
             end
-        end
 
-        if #lines == 0 then
-            local notify = require("utils.notify")
-            notify.error("No displayable keybinds found")
-            return
-        end
+            if #lines == 0 then
+                local notify = require("utils.notify")
+                notify.error("No displayable keybinds found")
+                return
+            end
 
-        local menu_input = table.concat(lines, "\n")
-        local rofi_theme = ROFI_DIR .. "/config-keybinds.rasi"
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -dmenu -i -config %s -mesg '%s' &",
-            menu_input:gsub("'", "'\"'\"'"),
-            rofi_theme,
-            msg
-        )
+            local menu_input = table.concat(lines, "\n")
+            local rofi_theme = ROFI_DIR .. "/config-keybinds.rasi"
+            local rofi_cmd = string.format(
+                "echo '%s' | rofi -dmenu -i -config %s -mesg '%s' &",
+                menu_input:gsub("'", "'\"'\"'"),
+                rofi_theme,
+                msg
+            )
 
-        hl.exec_cmd(rofi_cmd)
+            hl.exec_cmd(rofi_cmd)
+        end)
     end)
 
     if not success then

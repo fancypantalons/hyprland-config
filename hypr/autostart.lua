@@ -2,11 +2,6 @@
 -- Based on Startup_Apps.conf
 
 
--- Helper to cache the current bind list for show_binds() (avoids hyprctl deadlock)
-local function cache_binds()
-  hl.exec_cmd("mkdir -p ~/.cache/hypr && hyprctl binds -j | jq -r '.[] | select(.submap == \"\" and .catch_all == false and .mouse == false) | [(.modmask | tostring), .key, .description, .dispatcher, .arg] | @tsv' > ~/.cache/hypr/binds.tsv")
-end
-
 hl.on("hyprland.start", function()
   -- Make sure any running tmux instances don't hold on to this old variable
   hl.exec_cmd("tmux setenv -g HYPRLAND_INSTANCE_SIGNATURE \"" .. os.getenv("HYPRLAND_INSTANCE_SIGNATURE") .. "\"")
@@ -47,12 +42,6 @@ hl.on("hyprland.start", function()
   -- Starting hypridle to start hyprlock
   hl.exec_cmd("hypridle")
 
-  -- Cache binds for show_binds() to avoid hyprctl deadlock
-  cache_binds()
-  
   -- Special workspace for keepassxc
   hl.exec_cmd("keepassxc", { workspace = "special:keepassxc" })
 end)
-
--- Re-cache binds after every config reload so show_binds() stays current
-hl.on("config.reloaded", cache_binds)
