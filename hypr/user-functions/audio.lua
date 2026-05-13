@@ -102,14 +102,6 @@ local function play_volume_sound()
     end
 end
 
----Send a volume notification
--- @param volume number The current volume level
--- @param muted boolean Whether the volume is muted
-local function notify_volume(volume, muted)
-    local notify = require("utils.notify")
-    notify.volume(volume, muted)
-end
-
 ---Send a microphone notification
 -- @param muted boolean Whether the microphone is muted
 local function notify_mic(muted)
@@ -147,7 +139,6 @@ function audio.volume_up()
         local muted = is_muted()
 
         if muted == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to check mute state")
 
             return
@@ -157,7 +148,6 @@ function audio.volume_up()
             local result = helpers.exec("pamixer -u")
 
             if not result.success then
-                local notify = require("utils.notify")
                 notify.error("Failed to unmute", result.stderr)
 
                 return
@@ -167,7 +157,6 @@ function audio.volume_up()
         local result = helpers.exec("pamixer -i 5 --allow-boost --set-limit 150")
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to increase volume", result.stderr)
 
             return
@@ -176,7 +165,7 @@ function audio.volume_up()
         local volume = get_volume()
 
         if volume then
-            notify_volume(volume, false)
+            notify.volume(volume, false)
             play_volume_sound()
         end
     end)
@@ -191,7 +180,6 @@ function audio.volume_down()
         local muted = is_muted()
 
         if muted == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to check mute state")
 
             return
@@ -201,7 +189,6 @@ function audio.volume_down()
             local result = helpers.exec("pamixer -u")
 
             if not result.success then
-                local notify = require("utils.notify")
                 notify.error("Failed to unmute", result.stderr)
 
                 return
@@ -211,7 +198,6 @@ function audio.volume_down()
         local result = helpers.exec("pamixer -d 5")
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to decrease volume", result.stderr)
 
             return
@@ -220,7 +206,7 @@ function audio.volume_down()
         local volume = get_volume()
 
         if volume then
-            notify_volume(volume, false)
+            notify.volume(volume, false)
             play_volume_sound()
         end
     end)
@@ -234,7 +220,6 @@ function audio.volume_toggle()
         local muted = is_muted()
 
         if muted == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to check mute state")
 
             return
@@ -249,7 +234,6 @@ function audio.volume_toggle()
         end
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to toggle mute", result.stderr)
 
             return
@@ -258,7 +242,7 @@ function audio.volume_toggle()
         local new_muted = not muted
         local volume = get_volume() or 0
 
-        notify_volume(volume, new_muted)
+        notify.volume(volume, new_muted)
     end)
 end
 
@@ -270,7 +254,6 @@ function audio.mic_toggle()
         local muted = is_mic_muted()
 
         if muted == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to check mic state")
 
             return
@@ -285,7 +268,6 @@ function audio.mic_toggle()
         end
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to toggle mic", result.stderr)
 
             return

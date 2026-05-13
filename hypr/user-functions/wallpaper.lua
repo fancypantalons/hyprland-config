@@ -265,7 +265,6 @@ local function swww_apply_after_daemon(image_path, target_monitor)
     helpers.exec_async(swww_cmd, function(exit_code, _)
         pcall(function()
             if exit_code ~= 0 then
-                local notify = require("utils.notify")
                 notify.error("Failed to apply wallpaper")
 
                 return
@@ -285,7 +284,6 @@ end
 local offer_sddm_wallpaper
 local set_sddm_wallpaper
 local function apply_image_wallpaper(image_path, monitor)
-    local notify = require("utils.notify")
     local target_monitor = monitor or get_focused_monitor()
 
     if not target_monitor then
@@ -311,7 +309,6 @@ end
 ---Apply a video wallpaper using mpvpaper
 -- @param video_path string Path to the video file
 local function apply_video_wallpaper(video_path)
-    local notify = require("utils.notify")
 
     if not command_exists("mpvpaper") then
         notify.error("mpvpaper not found", "Install mpvpaper for video wallpapers")
@@ -333,7 +330,6 @@ end
 -- Shows a yad dialog if simple_sddm_2 theme exists
 -- @param is_effect boolean Whether this is an effect wallpaper
 offer_sddm_wallpaper = function(is_effect)
-    local notify = require("utils.notify")
 
     local sddm_dir = nil
 
@@ -389,7 +385,6 @@ end
 -- Launches kitty with sudo commands for privileged operations
 -- @param mode string Either "normal" or "effects" to determine which wallpaper to use
 set_sddm_wallpaper = function(mode)
-    local notify = require("utils.notify")
 
     local sddm_dir = nil
 
@@ -548,7 +543,6 @@ end
 -- Modifies Startup_Apps.conf for video vs image wallpaper
 -- @function select
 function wallpaper.select()
-    local notify = require("utils.notify")
 
     if not command_exists("bc") then
         notify.error("bc missing", "Install package bc first")
@@ -628,7 +622,6 @@ end
 -- Runs wallust and refreshes the UI
 -- @function random
 function wallpaper.random()
-    local notify = require("utils.notify")
 
     helpers.safe_call("Random wallpaper failed", function()
         local wallpapers = get_wallpaper_list()
@@ -698,7 +691,6 @@ end
 -- Runs wallust on modified image
 -- @function effects
 function wallpaper.effects()
-    local notify = require("utils.notify")
 
     if not command_exists("magick") and not command_exists("convert") then
         notify.error("ImageMagick not found", "Install imagemagick for wallpaper effects")
@@ -835,7 +827,6 @@ end
 -- This function starts a background process
 -- @function auto_change
 function wallpaper.auto_change()
-    local notify = require("utils.notify")
 
     helpers.safe_call("Auto-change failed", function()
         local wallpapers = get_wallpaper_list()
@@ -928,7 +919,6 @@ end
 -- @param image_path string|nil Optional explicit image path
 -- @function apply_wallust
 function wallpaper.apply_wallust(image_path)
-    local notify = require("utils.notify")
 
     helpers.safe_call("Wallust application failed", function()
         local wallpaper_path = image_path

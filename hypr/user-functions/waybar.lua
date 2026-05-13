@@ -133,7 +133,6 @@ end
 -- Applies the selected style and refreshes the UI
 -- @function select_style
 function waybar.select_style()
-    local notify = require("utils.notify")
 
     kill_rofi()
 
@@ -192,7 +191,6 @@ end
 -- Special handling for "no panel" option to kill waybar
 -- @function select_layout
 function waybar.select_layout()
-    local notify = require("utils.notify")
 
     kill_rofi()
 

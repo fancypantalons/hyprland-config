@@ -1965,7 +1965,6 @@ local function stop_music()
     local mpv_pids = result.stdout
     local mpvpaper_result = helpers.exec("ps aux | grep -- 'unique-wallpaper-process' | grep -v 'grep' | awk '{print $2}'")
     local mpvpaper_pid = mpvpaper_result.success and mpvpaper_result.stdout or ""
-    local notify = require("utils.notify")
 
     for pid in string.gmatch(mpv_pids, "%d+") do
         if (not string.find(mpvpaper_pid, pid, 1, true)) then
@@ -2062,7 +2061,6 @@ end
 function rofi.beats()
     kill_rofi()
 
-    local notify = require("utils.notify")
     local menu_options = "Play from Online Stations\nPlay from Music directory\nShuffle Play from Music directory\nStop RofiBeats"
     local rofi_cmd = string.format(
         "echo '%s' | rofi -dmenu -config %s",
@@ -2184,7 +2182,6 @@ end
 function rofi.calc()
     kill_rofi()
 
-    local notify = require("utils.notify")
 
     local function calc_loop(calc_result, last_input)
         local mesg = ""
@@ -2233,7 +2230,6 @@ end
 function rofi.emoji()
     kill_rofi()
 
-    local notify = require("utils.notify")
     local msg = "** note ** 👀 Click or Return to choose || Ctrl V to Paste"
 
     local tmpfile = "/tmp/rofi-emoji-data-" .. tostring(os.time())
@@ -2270,7 +2266,6 @@ end
 function rofi.search()
     kill_rofi()
 
-    local notify = require("utils.notify")
     local search_engine = get_search_engine()
 
     if (search_engine == nil or search_engine == "") then
@@ -2306,7 +2301,6 @@ end
 function rofi.theme_selector()
     kill_rofi()
 
-    local notify = require("utils.notify")
 
     -- Check directories exist
     local config_exists = helpers.path_exists(ROFI_THEMES_DIR_CONFIG)
@@ -2460,7 +2454,6 @@ function rofi.animations()
     local success, err = pcall(function()
         kill_rofi()
 
-        local notify = require("utils.notify")
 
         -- Check animations directory exists
         if (not helpers.dir_exists(ANIMATIONS_DIR)) then
@@ -2541,7 +2534,6 @@ function rofi.animations()
     end)
 
     if (not success) then
-        local notify = require("utils.notify")
         notify.error("RofiAnimations failed", tostring(err))
     end
 end

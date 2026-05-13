@@ -63,15 +63,6 @@ local function notify_system(title, message)
     })
 end
 
----Send an error notification
----@param message string The error message
----@param details string|nil Optional error details
-local function notify_error(message, details)
-    local notify = require("utils.notify")
-
-    notify.error(message, details)
-end
-
 -- ============================================
 -- AIRPLANE MODE
 -- ============================================
@@ -92,7 +83,7 @@ function system.airplane_mode()
             if toggle_result.success then
                 notify_system("Airplane Mode", "OFF")
             else
-                notify_error("Failed to disable airplane mode", toggle_result.stderr)
+                notify.error("Failed to disable airplane mode", toggle_result.stderr)
 
                 return
             end
@@ -102,7 +93,7 @@ function system.airplane_mode()
             if toggle_result.success then
                 notify_system("Airplane Mode", "ON")
             else
-                notify_error("Failed to enable airplane mode", toggle_result.stderr)
+                notify.error("Failed to enable airplane mode", toggle_result.stderr)
 
                 return
             end
@@ -118,7 +109,7 @@ end
 -- Sets the TOUCHPAD_ENABLED variable to true and saves state
 local function touchpad_enable()
     if not helpers.write_file(STATUS_FILE, "true") then
-        notify_error("Failed to save touchpad state")
+        notify.error("Failed to save touchpad state")
         return false
     end
 
@@ -132,7 +123,7 @@ end
 -- Sets the TOUCHPAD_ENABLED variable to false and saves state
 local function touchpad_disable()
     if not helpers.write_file(STATUS_FILE, "false") then
-        notify_error("Failed to save touchpad state")
+        notify.error("Failed to save touchpad state")
         return false
     end
 
@@ -182,7 +173,7 @@ function system.clipboard_manager()
     helpers.exec_async("cliphist list", function(ec, cliphist_stdout)
         pcall(function()
             if ec ~= 0 or cliphist_stdout == "" then
-                notify_error("Failed to get clipboard history", "Is cliphist installed?")
+                notify.error("Failed to get clipboard history", "Is cliphist installed?")
 
                 return
             end
@@ -244,7 +235,7 @@ function system.idle_inhibit_toggle()
             if kill_result.success then
                 notify_system("Screen auto-lock", "Disabled — screen won't lock")
             else
-                notify_error("Failed to stop hypridle")
+                notify.error("Failed to stop hypridle")
             end
         else
             hl.exec_cmd("hypridle &")
@@ -292,7 +283,7 @@ function system.start_polkit()
             end
         end
 
-        notify_error("No polkit agent found", "Please install a polkit agent")
+        notify.error("No polkit agent found", "Please install a polkit agent")
     end)
 end
 
@@ -555,7 +546,7 @@ function system.toggle_dropdown()
             spawn_dropdown_terminal(terminal_cmd, function(spawn_success)
                 pcall(function()
                     if not spawn_success then
-                        notify_error("Failed to spawn dropdown terminal")
+                        notify.error("Failed to spawn dropdown terminal")
                         return
                     end
 

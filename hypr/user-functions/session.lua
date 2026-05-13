@@ -158,7 +158,6 @@ end
 ---Show error notification for failed screenshot
 -- @param title string The error title
 local function notify_screenshot_error(title)
-    local notify = require("utils.notify")
     notify.error(title or "Screenshot NOT Saved")
     play_error_sound()
 end
@@ -438,7 +437,6 @@ function session.screenshot(mode)
         elseif mode == SCREENSHOT_MODES.SWAPPY then
             screenshot_swappy()
         else
-            local notify = require("utils.notify")
             notify.error("Unknown screenshot mode: " .. tostring(mode))
         end
     end)
@@ -530,7 +528,6 @@ function session.show_binds()
 
         helpers.get_binds(function(binds)
             if #binds == 0 then
-                local notify = require("utils.notify")
                 notify.error("No keybinds found", "Bind cache may not be populated yet")
                 return
             end
@@ -554,7 +551,6 @@ function session.show_binds()
             end
 
             if #lines == 0 then
-                local notify = require("utils.notify")
                 notify.error("No displayable keybinds found")
                 return
             end

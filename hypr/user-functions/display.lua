@@ -133,12 +133,6 @@ end
 -- NOTIFICATION HELPERS
 -- ============================================
 
----Send a screen brightness notification
--- @param brightness number The current brightness level
-local function notify_brightness(brightness)
-    notify.brightness(brightness)
-end
-
 ---Send a keyboard brightness notification
 -- @param brightness number The current keyboard brightness level
 local function notify_kbd_brightness(brightness)
@@ -155,7 +149,6 @@ end
 -- @param enabled boolean Whether night light is enabled
 -- @param temp number|nil The color temperature in Kelvin
 local function notify_nightlight(enabled, temp)
-    local notify = require("utils.notify")
 
     if enabled then
         notify.info(string.format("Night light enabled @ %dK", temp or NIGHTLIGHT_TEMP))
@@ -190,7 +183,6 @@ function display.brightness_up()
         local current = get_brightness()
 
         if current == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to get current brightness")
 
             return
@@ -205,13 +197,12 @@ function display.brightness_up()
         local result = helpers.exec(string.format("brightnessctl set %d%%", new_brightness))
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to increase brightness", result.stderr)
 
             return
         end
 
-        notify_brightness(new_brightness)
+        notify.brightness(new_brightness)
     end)
 end
 
@@ -224,7 +215,6 @@ function display.brightness_down()
         local current = get_brightness()
 
         if current == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to get current brightness")
 
             return
@@ -239,13 +229,12 @@ function display.brightness_down()
         local result = helpers.exec(string.format("brightnessctl set %d%%", new_brightness))
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to decrease brightness", result.stderr)
 
             return
         end
 
-        notify_brightness(new_brightness)
+        notify.brightness(new_brightness)
     end)
 end
 
@@ -261,7 +250,6 @@ function display.kbd_brightness_up()
         local current = get_kbd_brightness()
 
         if current == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to get keyboard brightness")
 
             return
@@ -270,7 +258,6 @@ function display.kbd_brightness_up()
         local result = helpers.exec("brightnessctl -d '*::kbd_backlight' set +30%")
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to increase keyboard brightness", result.stderr)
 
             return
@@ -290,7 +277,6 @@ function display.kbd_brightness_down()
         local current = get_kbd_brightness()
 
         if current == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to get keyboard brightness")
 
             return
@@ -299,7 +285,6 @@ function display.kbd_brightness_down()
         local result = helpers.exec("brightnessctl -d '*::kbd_backlight' set 30%-")
 
         if not result.success then
-            local notify = require("utils.notify")
             notify.error("Failed to decrease keyboard brightness", result.stderr)
 
             return
@@ -397,7 +382,6 @@ function display.blur_toggle()
         local current_passes = get_blur_passes()
 
         if current_passes == nil then
-            local notify = require("utils.notify")
             notify.error("Failed to get blur setting")
 
             return
@@ -410,7 +394,6 @@ function display.blur_toggle()
             end)
 
             if not success then
-                local notify = require("utils.notify")
                 notify.error("Failed to set less blur")
 
                 return
@@ -424,7 +407,6 @@ function display.blur_toggle()
             end)
 
             if not success then
-                local notify = require("utils.notify")
                 notify.error("Failed to set normal blur")
 
                 return
