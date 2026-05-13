@@ -676,23 +676,27 @@ function wallpaper.random()
             selected
         )
 
-        local daemon_check = helpers.exec("pgrep -x swww-daemon")
-
-        if daemon_check.success then
-            hl.exec_cmd(swww_cmd)
-        else
-            hl.exec_cmd("swww-daemon --format xrgb &")
-            helpers.exec_async("sleep 0.5", function(_, _)
-                hl.exec_cmd(swww_cmd)
+        local function apply_and_refresh()
+            wallpaper.apply_wallust(selected)
+            refresh.refresh_ui(function()
+                notify.success("Random wallpaper applied")
             end)
         end
 
-        wallpaper.apply_wallust(selected)
+        local daemon_check = helpers.exec("pgrep -x swww-daemon")
 
-        helpers.exec_async("sleep 2", function(_, _)
-            refresh.refresh_ui()
-            notify.success("Random wallpaper applied")
-        end)
+        if daemon_check.success then
+            helpers.exec_async(swww_cmd, function(_, _)
+                pcall(apply_and_refresh)
+            end)
+        else
+            hl.exec_cmd("swww-daemon --format xrgb &")
+            helpers.exec_async("sleep 0.5", function(_, _)
+                helpers.exec_async(swww_cmd, function(_, _)
+                    pcall(apply_and_refresh)
+                end)
+            end)
+        end
     end)
 
     if not success then

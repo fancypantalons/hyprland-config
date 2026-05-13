@@ -466,10 +466,31 @@ local function most_recent_window_address()
     return last and last.address or nil
 end
 
----Spawn a new dropdown terminal
+---Poll for a new window to appear (async) and return its address.
+---@param count_before number Window count before spawning
+---@param attempts_left number Remaining poll attempts
+---@param cb function Called with (address|nil)
+local function poll_for_new_window(count_before, attempts_left, cb)
+    if attempts_left <= 0 then
+        cb(nil)
+        return
+    end
+
+    local count_after = #hl.get_windows()
+
+    if count_after > count_before then
+        cb(most_recent_window_address())
+    else
+        helpers.exec_async("sleep 0.05", function()
+            poll_for_new_window(count_before, attempts_left - 1, cb)
+        end)
+    end
+end
+
+---Spawn a new dropdown terminal (async)
 ---@param terminal_cmd string The terminal command to run
----@return boolean True if successful
-local function spawn_dropdown_terminal(terminal_cmd)
+---@param cb function Called with (success: boolean)
+local function spawn_dropdown_terminal(terminal_cmd, cb)
     local pos = calculate_dropdown_position()
     local active_ws = hl.get_active_workspace()
     local current_ws = active_ws and active_ws.id or 1
@@ -477,34 +498,30 @@ local function spawn_dropdown_terminal(terminal_cmd)
     local count_before = #hl.get_windows()
 
     -- Launch the terminal hidden in the special workspace.
-    -- Pass the rule string in [...]; the bash -c shell handles the rest.
-    hl.dispatch(hl.dsp.exec_cmd(string.format(
+    hl.exec_cmd(string.format(
         "[float; size %d %d; workspace %s silent] %s",
         pos.width, pos.height, SPECIAL_WORKSPACE, terminal_cmd
-    )))
-    helpers.sleep(0.1)
+    ))
 
-    local count_after = #hl.get_windows()
-    local new_addr = nil
+    poll_for_new_window(count_before, 20, function(new_addr)
+        pcall(function()
+            if not new_addr or new_addr == "" then
+                cb(false)
+                return
+            end
 
-    if count_after > count_before then
-        new_addr = most_recent_window_address()
-    end
+            helpers.write_file(DROPDOWN_ADDR_FILE, string.format("%s %s", new_addr, pos.monitor_name))
 
-    if not new_addr or new_addr == "" then
-        return false
-    end
+            hl.dispatch(hl.dsp.window.move({
+                workspace = current_ws, silent = true, window = "address:" .. new_addr,
+            }))
+            hl.dispatch(hl.dsp.window.pin({ window = "address:" .. new_addr }))
 
-    helpers.write_file(DROPDOWN_ADDR_FILE, string.format("%s %s", new_addr, pos.monitor_name))
+            animate_slide_down(new_addr, pos.x, pos.y, pos.width, pos.height)
 
-    hl.dispatch(hl.dsp.window.move({
-        workspace = current_ws, silent = true, window = "address:" .. new_addr,
-    }))
-    hl.dispatch(hl.dsp.window.pin({ window = "address:" .. new_addr }))
-
-    animate_slide_down(new_addr, pos.x, pos.y, pos.width, pos.height)
-
-    return true
+            cb(true)
+        end)
+    end)
 end
 
 ---Toggle the dropdown terminal
@@ -554,14 +571,19 @@ function system.toggle_dropdown()
                 }))
             end
         else
-            if spawn_dropdown_terminal(terminal_cmd) then
-                local new_addr = get_dropdown_address()
-                if new_addr then
-                    hl.dispatch(hl.dsp.focus({ window = "address:" .. new_addr }))
-                end
-            else
-                notify_error("Failed to spawn dropdown terminal")
-            end
+            spawn_dropdown_terminal(terminal_cmd, function(spawn_success)
+                pcall(function()
+                    if not spawn_success then
+                        notify_error("Failed to spawn dropdown terminal")
+                        return
+                    end
+
+                    local new_addr = get_dropdown_address()
+                    if new_addr then
+                        hl.dispatch(hl.dsp.focus({ window = "address:" .. new_addr }))
+                    end
+                end)
+            end)
         end
     end)
 
