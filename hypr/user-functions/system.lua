@@ -481,7 +481,7 @@ local function poll_for_new_window(count_before, attempts_left, cb)
     if count_after > count_before then
         cb(most_recent_window_address())
     else
-        helpers.exec_async("sleep 0.05", function()
+        helpers.delay(0.05, function()
             poll_for_new_window(count_before, attempts_left - 1, cb)
         end)
     end
@@ -795,7 +795,7 @@ function system.start_portals()
             pcall(function()
                 hl.exec_cmd("/usr/lib/xdg-desktop-portal-hyprland 2>/dev/null &")
                 hl.exec_cmd("/usr/libexec/xdg-desktop-portal-hyprland 2>/dev/null &")
-                helpers.exec_async("sleep 2", function(_, _)
+                helpers.delay(2, function()
                     hl.exec_cmd("/usr/lib/xdg-desktop-portal 2>/dev/null &")
                     hl.exec_cmd("/usr/libexec/xdg-desktop-portal 2>/dev/null &")
                 end)

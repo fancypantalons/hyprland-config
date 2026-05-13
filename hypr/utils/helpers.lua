@@ -84,6 +84,18 @@ function helpers.exec_callback(id)
    cb(exit_code, data)
 end
 
+---Delay execution asynchronously and invoke a callback after the specified time.
+-- This is a convenience wrapper around exec_async that sleeps in the shell.
+-- Unlike helpers.sleep(), this does NOT block the compositor event loop.
+--
+-- @param seconds number The number of seconds to delay (can be fractional, e.g., 0.5)
+-- @param cb function The callback to invoke after the delay (receives no arguments)
+function helpers.delay(seconds, cb)
+    helpers.exec_async("sleep " .. tonumber(seconds) or 1, function(_, _)
+        cb()
+    end)
+end
+
 ---Test exec_async callback mechanism. Sends a notification with exit code and output.
 -- Run: hyprctl eval 'helpers.test_async()'
 function helpers.test_async()

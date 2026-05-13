@@ -128,7 +128,7 @@ local function countdown_then(seconds, cb)
         timeout = 1000
     })
 
-    helpers.exec_async("sleep 1", function(_, _)
+    helpers.delay(1, function()
         countdown_then(seconds - 1, cb)
     end)
 end

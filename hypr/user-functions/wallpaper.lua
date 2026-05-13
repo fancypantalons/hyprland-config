@@ -302,7 +302,7 @@ local function apply_image_wallpaper(image_path, monitor)
         swww_apply_after_daemon(image_path, target_monitor)
     else
         hl.exec_cmd("swww-daemon --format xrgb &")
-        helpers.exec_async("sleep 0.5", function(_, _)
+        helpers.delay(0.5, function()
             swww_apply_after_daemon(image_path, target_monitor)
         end)
     end
@@ -691,7 +691,7 @@ function wallpaper.random()
             end)
         else
             hl.exec_cmd("swww-daemon --format xrgb &")
-            helpers.exec_async("sleep 0.5", function(_, _)
+            helpers.delay(0.5, function()
                 helpers.exec_async(swww_cmd, function(_, _)
                     pcall(apply_and_refresh)
                 end)
@@ -785,7 +785,7 @@ function wallpaper.effects()
 
             wallpaper.apply_wallust(PATHS.wallpaper_current)
 
-            helpers.exec_async("sleep 2", function(_, _)
+            helpers.delay(2, function()
                 refresh.refresh_ui()
                 notify.info("No effects applied")
             end)
@@ -815,7 +815,7 @@ function wallpaper.effects()
         hl.exec_cmd("killall -SIGUSR1 swaybg 2>/dev/null || true")
         hl.exec_cmd("killall -SIGUSR1 mpvpaper 2>/dev/null || true")
 
-        helpers.exec_async("sleep 1", function(_, _)
+        helpers.delay(1, function()
             local monitor = get_focused_monitor()
 
             if (monitor) then
@@ -828,10 +828,10 @@ function wallpaper.effects()
                 hl.exec_cmd(swww_cmd)
             end
 
-            helpers.exec_async("sleep 2", function(_, _)
+            helpers.delay(2, function()
                 hl.exec_cmd("wallust run '" .. PATHS.wallpaper_modified .. "' -s")
 
-                helpers.exec_async("sleep 1", function(_, _)
+                helpers.delay(1, function()
                     refresh.refresh_ui()
                     notify.success(choice .. " effects applied")
                     offer_sddm_wallpaper(true)

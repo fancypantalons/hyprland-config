@@ -2537,7 +2537,7 @@ function rofi.animations()
         })
 
         -- Run refresh (no waybar restart, async)
-        helpers.exec_async("sleep 0.5", function(_, _)
+        helpers.delay(0.5, function()
             refresh.refresh_ui_no_waybar()
         end)
     end)

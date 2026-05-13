@@ -89,19 +89,19 @@ function refresh.refresh_ui(cb)
                 end
             end
 
-            helpers.exec_async("sleep 1", function(_, _)
+            helpers.delay(1, function()
                 pcall(function()
                     hl.exec_cmd("waybar &")
 
-                    helpers.exec_async("sleep 0.5", function(_, _)
+                    helpers.delay(0.5, function()
                         pcall(function()
                             hl.exec_cmd("swaync > /dev/null 2>&1 &")
 
-                            helpers.exec_async("sleep 0.2", function(_, _)
+                            helpers.delay(0.2, function()
                                 pcall(function()
                                     hl.exec_cmd("swaync-client --reload-config")
 
-                                    helpers.exec_async("sleep 1", function(_, _)
+                                    helpers.delay(1, function()
                                         pcall(function()
                                             if file_exists(USERSCRIPTS .. "/RainbowBorders.sh") then
                                                 hl.exec_cmd(USERSCRIPTS .. "/RainbowBorders.sh &")
@@ -136,11 +136,11 @@ function refresh.refresh_ui_no_waybar(cb)
             local wallpaper = require("user-functions.wallpaper")
             wallpaper.apply_wallust()
 
-            helpers.exec_async("sleep 0.2", function(_, _)
+            helpers.delay(0.2, function()
                 pcall(function()
                     hl.exec_cmd("swaync-client --reload-config")
 
-                    helpers.exec_async("sleep 1", function(_, _)
+                    helpers.delay(1, function()
                         pcall(function()
                             if file_exists(USERSCRIPTS .. "/RainbowBorders.sh") then
                                 hl.exec_cmd(USERSCRIPTS .. "/RainbowBorders.sh &")
