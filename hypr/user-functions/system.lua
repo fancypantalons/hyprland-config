@@ -10,6 +10,7 @@
 local system = {}
 local helpers = require("utils.helpers")
 local notify = require("utils.notify")
+local devices = require("devices")
 
 -- ============================================
 -- CONFIGURATION
@@ -121,7 +122,7 @@ local function touchpad_enable()
         return false
     end
 
-    hl.device({ name = "asue1209:00-04f3:319f-touchpad", enabled = true })
+    hl.device({ name = devices.TOUCHPAD_DEVICE, enabled = true })
     notify_system("Touchpad", "Enabled")
 
     return true
@@ -135,7 +136,7 @@ local function touchpad_disable()
         return false
     end
 
-    hl.device({ name = "asue1209:00-04f3:319f-touchpad", enabled = false })
+    hl.device({ name = devices.TOUCHPAD_DEVICE, enabled = false })
     notify_system("Touchpad", "Disabled")
 
     return true
