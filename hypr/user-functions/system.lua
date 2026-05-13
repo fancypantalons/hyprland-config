@@ -1,39 +1,21 @@
----
--- System Control Functions
--- Provides airplane mode, touchpad toggle, clipboard manager, idle inhibitor,
--- polkit agent startup, and dropdown terminal functionality
---
--- @module user-functions.system
--- @author Brett
--- @license MIT
+-- System control: airplane mode, touchpad, clipboard, idle inhibitor, polkit,
+-- dropdown terminal, battery status, uptime, application launchers, XDG portals.
 
-local system = {}
+local system  = {}
 local helpers = require("utils.helpers")
-local notify = require("utils.notify")
+local notify  = require("utils.notify")
+local proc    = require("utils.proc")
+local state   = require("utils.state")
 local devices = require("devices")
 
--- ============================================
--- CONFIGURATION
--- ============================================
-
-local ICON_FILE = os.getenv("HOME") .. "/.config/swaync/images/ja.png"
-
-local CLIPBOARD_ROFI_THEME = os.getenv("HOME") .. "/.config/rofi/config-clipboard.rasi"
-
+local HOME     = os.getenv("HOME")
 local TERMINAL = "kitty"
-local FILE_MANAGER = "thunar"
+local FILE_MGR = "thunar"
 
-local STATUS_FILE = os.getenv("XDG_RUNTIME_DIR") .. "/touchpad.status"
+local CLIPBOARD_THEME = HOME .. "/.config/rofi/config-clipboard.rasi"
 
-local DROPDOWN_ADDR_FILE = "/tmp/dropdown_terminal_addr"
-
-local SPECIAL_WORKSPACE = "special:scratchpad"
-
-local DROPDOWN_CONFIG = {
-    width_percent = 50,
-    height_percent = 50,
-    y_percent = 5
-}
+local DROPDOWN_CONFIG = { width_pct = 50, height_pct = 50, y_pct = 5 }
+local SPECIAL_WS      = "special:scratchpad"
 
 local POLKIT_AGENTS = {
     "/usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1",
@@ -45,114 +27,41 @@ local POLKIT_AGENTS = {
     "/usr/libexec/polkit-gnome-authentication-agent-1",
     "/usr/libexec/polkit-mate-authentication-agent-1",
     "/usr/lib/x86_64-linux-gnu/libexec/polkit-kde-authentication-agent-1",
-    "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1"
+    "/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1",
 }
-
--- ============================================
--- HELPER FUNCTIONS
--- ============================================
-
----Send a system notification with the default icon
----@param title string The notification title
----@param message string The notification message
-local function notify_system(title, message)
-    notify.send({
-        text = title .. ": " .. message,
-        icon = ICON_FILE,
-        timeout = 2000
-    })
-end
 
 -- ============================================
 -- AIRPLANE MODE
 -- ============================================
 
----Toggle airplane mode (WiFi on/off) using rfkill
--- Checks the current WiFi state and toggles it
--- Shows a notification with the new state
--- @function airplane_mode
 function system.airplane_mode()
     helpers.safe_call("Airplane mode toggle failed", function()
-        local result = helpers.exec("/sbin/rfkill list wifi | grep 'Soft blocked: no'")
-        local is_blocked = result.success and result.stdout ~= ""
-        local toggle_result
+        local on = helpers.exec("/sbin/rfkill list wifi | grep 'Soft blocked: no'")
+        local blocking = on.success and on.stdout ~= ""
 
-        if is_blocked then
-            toggle_result = helpers.exec("/sbin/rfkill unblock wifi")
-
-            if toggle_result.success then
-                notify_system("Airplane Mode", "OFF")
-            else
-                notify.error("Failed to disable airplane mode", toggle_result.stderr)
-
-                return
-            end
+        if blocking then
+            helpers.exec("/sbin/rfkill block wifi")
+            notify.info("Airplane mode: ON")
         else
-            toggle_result = helpers.exec("/sbin/rfkill block wifi")
-
-            if toggle_result.success then
-                notify_system("Airplane Mode", "ON")
-            else
-                notify.error("Failed to enable airplane mode", toggle_result.stderr)
-
-                return
-            end
+            helpers.exec("/sbin/rfkill unblock wifi")
+            notify.info("Airplane mode: OFF")
         end
     end)
 end
 
 -- ============================================
--- TOUCHPAD TOGGLE
+-- TOUCHPAD
 -- ============================================
 
----Enable the touchpad
--- Sets the TOUCHPAD_ENABLED variable to true and saves state
-local function touchpad_enable()
-    if not helpers.write_file(STATUS_FILE, "true") then
-        notify.error("Failed to save touchpad state")
-        return false
-    end
-
-    hl.device({ name = devices.TOUCHPAD_DEVICE, enabled = true })
-    notify_system("Touchpad", "Enabled")
-
-    return true
+local function set_touchpad(enabled)
+    state.set("touchpad", tostring(enabled))
+    hl.device({ name = devices.TOUCHPAD_DEVICE, enabled = enabled })
+    notify.info("Touchpad: " .. (enabled and "Enabled" or "Disabled"))
 end
 
----Disable the touchpad
--- Sets the TOUCHPAD_ENABLED variable to false and saves state
-local function touchpad_disable()
-    if not helpers.write_file(STATUS_FILE, "false") then
-        notify.error("Failed to save touchpad state")
-        return false
-    end
-
-    hl.device({ name = devices.TOUCHPAD_DEVICE, enabled = false })
-    notify_system("Touchpad", "Disabled")
-
-    return true
-end
-
----Toggle the touchpad on/off
--- Uses the status file to track current state
--- Shows a notification with the new state
--- @function touchpad_toggle
 function system.touchpad_toggle()
     helpers.safe_call("Touchpad toggle failed", function()
-        local current = helpers.read_file(STATUS_FILE)
-
-        if not current then
-            touchpad_enable()
-            return
-        end
-
-        local status = current:gsub("%s+$", "")
-
-        if status == "true" then
-            touchpad_disable()
-        else
-            touchpad_enable()
-        end
+        set_touchpad(state.get("touchpad", "true") ~= "true")
     end)
 end
 
@@ -160,56 +69,38 @@ end
 -- CLIPBOARD MANAGER
 -- ============================================
 
----Open the clipboard manager using cliphist and rofi
--- Shows clipboard history in a rofi menu
--- Supports Ctrl+Delete to delete a single entry
--- Supports Alt+Delete to wipe all clipboard history
--- @function clipboard_manager
 function system.clipboard_manager()
-    hl.exec_cmd("pkill rofi 2>/dev/null")
+    proc.kill("rofi")
 
-    local msg = "CTRL+DEL = Delete entry | ALT+DEL = Wipe all"
-
-    helpers.exec_async("cliphist list", function(ec, cliphist_stdout)
+    helpers.exec_async("cliphist list", function(ec, stdout)
         pcall(function()
-            if ec ~= 0 or cliphist_stdout == "" then
+            if ec ~= 0 or stdout == "" then
                 notify.error("Failed to get clipboard history", "Is cliphist installed?")
-
                 return
             end
 
-            -- Run rofi with the clipboard entries
+            local input = helpers.trim(stdout)
             local rofi_cmd = string.format(
-                "echo '%s' | rofi -i -dmenu -kb-custom-1 'Control-Delete' -kb-custom-2 'Alt-Delete' -config '%s' -mesg '%s'",
-                cliphist_stdout:gsub("%s+$", ""):gsub("'", "'\"'\"'"),
-                CLIPBOARD_ROFI_THEME,
-                msg
+                "echo %s | rofi -i -dmenu -kb-custom-1 'Control-Delete' -kb-custom-2 'Alt-Delete' -config %s -mesg %s",
+                helpers.shquote(input:gsub("'", "'\"'\"'")),
+                helpers.shquote(CLIPBOARD_THEME),
+                helpers.shquote("CTRL+DEL = Delete entry | ALT+DEL = Wipe all")
             )
 
-            helpers.exec_async(rofi_cmd, function(rofi_ec, selection)
+            helpers.exec_async(rofi_cmd, function(rofi_ec, sel)
                 pcall(function()
-                    selection = selection:gsub("%s+$", "")
+                    sel = helpers.trim(sel)
+                    if rofi_ec == 1 or sel == "" then return end
 
-                    if rofi_ec == 1 or selection == "" then
-                        return
-                    end
-
+                    local q = helpers.shquote(sel)
                     if rofi_ec == 0 then
-                        hl.exec_cmd(string.format(
-                            "echo '%s' | cliphist decode | wl-copy",
-                            selection:gsub("'", "'\"'\"'")
-                        ))
-
+                        hl.exec_cmd(string.format("echo %s | cliphist decode | wl-copy", q))
                     elseif rofi_ec == 10 then
-                        hl.exec_cmd(string.format(
-                            "echo '%s' | cliphist delete",
-                            selection:gsub("'", "'\"'\"'")
-                        ))
-                        notify_system("Clipboard", "Entry deleted")
-
+                        hl.exec_cmd(string.format("echo %s | cliphist delete", q))
+                        notify.info("Clipboard: entry deleted")
                     elseif rofi_ec == 11 then
                         hl.exec_cmd("cliphist wipe")
-                        notify_system("Clipboard", "History wiped")
+                        notify.info("Clipboard: history wiped")
                     end
                 end)
             end)
@@ -218,71 +109,43 @@ function system.clipboard_manager()
 end
 
 -- ============================================
--- IDLE INHIBITOR (HYPRIDLE)
+-- IDLE INHIBITOR
 -- ============================================
 
----Toggle the hypridle process on/off
--- Checks if hypridle is running and toggles its state
--- @function idle_inhibit_toggle
 function system.idle_inhibit_toggle()
     helpers.safe_call("Idle inhibitor toggle failed", function()
-        local check_result = helpers.exec("pgrep -x hypridle")
-        local is_running = check_result.success
-
-        if is_running then
-            local kill_result = helpers.exec("pkill -x hypridle")
-
-            if kill_result.success then
-                notify_system("Screen auto-lock", "Disabled — screen won't lock")
-            else
-                notify.error("Failed to stop hypridle")
-            end
+        if proc.running("hypridle") then
+            helpers.exec("pkill -x hypridle")
+            notify.info("Screen auto-lock: Disabled")
         else
             hl.exec_cmd("hypridle &")
-            notify_system("Screen auto-lock", "Enabled — screen will lock when idle")
+            notify.info("Screen auto-lock: Enabled")
         end
     end)
 end
 
----Get the idle inhibitor status for Waybar
--- Returns JSON formatted output for Waybar custom module
--- @return string JSON with text, class, and tooltip
--- @function idle_inhibit_status
 function system.idle_inhibit_status()
-    return helpers.safe_call_with_return(
-        "Idle inhibitor status check failed",
-        function()
-            local check_result = helpers.exec("pgrep -x hypridle")
-            local is_running = check_result.success
-
-            if is_running then
-                return '{"text": "RUNNING", "class": "active", "tooltip": "Screen auto-lock: ON\nLeft Click: Disable auto-lock\nRight Click: Lock now"}'
-            else
-                return '{"text": "NOT RUNNING", "class": "notactive", "tooltip": "Screen auto-lock: OFF\nLeft Click: Enable auto-lock\nRight Click: Lock now"}'
-            end
-        end,
-        '{"text": "ERROR", "class": "error", "tooltip": "Failed to check status"}'
-    )
+    return helpers.safe_call("Idle inhibitor status failed", function()
+        if proc.running("hypridle") then
+            return '{"text":"RUNNING","class":"active","tooltip":"Screen auto-lock: ON\nLeft Click: Disable\nRight Click: Lock now"}'
+        else
+            return '{"text":"NOT RUNNING","class":"notactive","tooltip":"Screen auto-lock: OFF\nLeft Click: Enable\nRight Click: Lock now"}'
+        end
+    end, '{"text":"ERROR","class":"error","tooltip":"Failed to check status"}')
 end
 
 -- ============================================
 -- POLKIT AGENT
 -- ============================================
 
----Start the first available polkit authentication agent
--- Checks a list of common polkit agent paths and executes the first one found
--- @function start_polkit
 function system.start_polkit()
     helpers.safe_call("Polkit startup failed", function()
-        for _, agent_path in ipairs(POLKIT_AGENTS) do
-            if helpers.file_exists(agent_path) then
-                -- Execute the polkit agent
-                hl.exec_cmd(agent_path)
-
+        for _, path in ipairs(POLKIT_AGENTS) do
+            if helpers.file_exists(path) then
+                hl.exec_cmd(path)
                 return
             end
         end
-
         notify.error("No polkit agent found", "Please install a polkit agent")
     end)
 end
@@ -291,269 +154,110 @@ end
 -- DROPDOWN TERMINAL
 -- ============================================
 
----Read the dropdown state file as "address monitor".
----@return string|nil address, string|nil monitor
-local function read_dropdown_state()
-    local data = helpers.read_file(DROPDOWN_ADDR_FILE)
-    if not data or data == "" then
-        return nil, nil
-    end
-
-    local first_line = data:match("[^\r\n]+") or ""
-    local addr, monitor = first_line:match("^(%S+)%s+(.+)$")
-    if not addr then
-        addr = first_line:match("^(%S+)") -- monitor missing; tolerate
-    end
-
-    return addr, monitor
+local function get_monitor_info()
+    local m = hl.get_active_monitor()
+    if not m then return { x=0, y=0, width=1920, height=1080, scale=1.0, name="DP-1" } end
+    return { x=m.x or 0, y=m.y or 0, width=m.width or 1920,
+             height=m.height or 1080, scale=m.scale or 1.0, name=m.name or "DP-1" }
 end
 
----Get the stored terminal address from file
----@return string|nil The terminal address or nil if not found
-local function get_dropdown_address()
-    local addr = read_dropdown_state()
-    return addr
+local function calc_dropdown_pos()
+    local m  = get_monitor_info()
+    local lw = math.floor(m.width  / m.scale)
+    local lh = math.floor(m.height / m.scale)
+    local w  = math.floor(lw * DROPDOWN_CONFIG.width_pct  / 100)
+    local h  = math.floor(lh * DROPDOWN_CONFIG.height_pct / 100)
+    local yo = math.floor(lh * DROPDOWN_CONFIG.y_pct      / 100)
+    local xo = math.floor((lw - w) / 2)
+    return { x = m.x + xo, y = m.y + yo, width = w, height = h, monitor = m.name }
 end
 
----Get the stored terminal monitor from file
----@return string|nil The monitor name or nil if not found
-local function get_dropdown_monitor()
-    local _, monitor = read_dropdown_state()
-    return monitor
-end
+local function dropdown_addr()   return state.get("dropdown_addr", nil)    end
+local function dropdown_monitor() return state.get("dropdown_monitor", nil) end
 
----Check if the terminal window still exists
----@param addr string The terminal address
----@return boolean True if the terminal exists
 local function dropdown_exists(addr)
     return hl.get_window("address:" .. addr) ~= nil
 end
 
----Check if the terminal is in the special workspace
----@param addr string The terminal address
----@return boolean True if in special workspace
-local function dropdown_in_special(addr)
+local function in_special(addr)
     local w = hl.get_window("address:" .. addr)
-    return w ~= nil and w.workspace ~= nil and w.workspace.name == SPECIAL_WORKSPACE
+    return w and w.workspace and w.workspace.name == SPECIAL_WS
 end
 
----Get focused monitor information
----@return table|nil Monitor info with x, y, width, height, scale, name
-local function get_monitor_info()
-    local m = hl.get_active_monitor()
-    if not m then
-        return nil
-    end
-    return {
-        x = m.x or 0,
-        y = m.y or 0,
-        width = m.width or 1920,
-        height = m.height or 1080,
-        scale = m.scale or 1.0,
-        name = m.name or "DP-1",
-    }
-end
-
----Calculate dropdown window position and size
----@return table Position with x, y, width, height, monitor_name
-local function calculate_dropdown_position()
-    local monitor = get_monitor_info()
-
-    if not monitor then
-        return {x = 100, y = 100, width = 800, height = 600, monitor_name = "unknown"}
-    end
-
-    -- Calculate logical dimensions (divide by scale)
-    local logical_width = math.floor(monitor.width / monitor.scale)
-    local logical_height = math.floor(monitor.height / monitor.scale)
-
-    -- Calculate window dimensions based on percentages
-    local width = math.floor(logical_width * DROPDOWN_CONFIG.width_percent / 100)
-    local height = math.floor(logical_height * DROPDOWN_CONFIG.height_percent / 100)
-
-    -- Calculate position
-    local y_offset = math.floor(logical_height * DROPDOWN_CONFIG.y_percent / 100)
-    local x_offset = math.floor((logical_width - width) / 2)
-
-    -- Apply monitor offset
-    local final_x = monitor.x + x_offset
-    local final_y = monitor.y + y_offset
-
-    return {
-        x = final_x,
-        y = final_y,
-        width = width,
-        height = height,
-        monitor_name = monitor.name
-    }
-end
-
----Move a window to absolute pixel coordinates.
-local function move_window_to(addr, x, y)
-    hl.dispatch(hl.dsp.window.move({
-        x = x, y = y, relative = false, window = "address:" .. addr,
-    }))
-end
-
----Resize a window to absolute pixel dimensions.
-local function resize_window_to(addr, width, height)
-    hl.dispatch(hl.dsp.window.resize({
-        x = width, y = height, relative = false, window = "address:" .. addr,
-    }))
-end
-
----Move the dropdown window to its target position (immediate, no animation)
-local function animate_slide_down(addr, target_x, target_y, width, height)
-    move_window_to(addr, target_x, target_y)
-end
-
----Placeholder — caller moves window to special workspace immediately after
-local function animate_slide_up(addr, start_x, start_y, width, height)
-    -- no-op; window is moved to special workspace by caller
-end
-
----Get window geometry
----@param addr string The terminal address
----@return table|nil Geometry with x, y, width, height
-local function get_window_geometry(addr)
-    local w = hl.get_window("address:" .. addr)
-    if not w then
-        return nil
-    end
-    return {
-        x = w.at[1] or 0,
-        y = w.at[2] or 0,
-        width = w.size[1] or 800,
-        height = w.size[2] or 600,
-    }
-end
-
----Find the most recently focused window's address.
-local function most_recent_window_address()
-    local windows = hl.get_windows()
-    table.sort(windows, function(a, b)
-        return (a.focus_history_id or 0) < (b.focus_history_id or 0)
-    end)
-    local last = windows[#windows]
+local function most_recent_addr()
+    local wins = hl.get_windows()
+    table.sort(wins, function(a, b) return (a.focus_history_id or 0) < (b.focus_history_id or 0) end)
+    local last = wins[#wins]
     return last and last.address or nil
 end
 
----Poll for a new window to appear (async) and return its address.
----@param count_before number Window count before spawning
----@param attempts_left number Remaining poll attempts
----@param cb function Called with (address|nil)
-local function poll_for_new_window(count_before, attempts_left, cb)
-    if attempts_left <= 0 then
-        cb(nil)
-        return
-    end
-
-    local count_after = #hl.get_windows()
-
-    if count_after > count_before then
-        cb(most_recent_window_address())
+local function poll_for_new_window(count_before, attempts, cb)
+    if attempts <= 0 then cb(nil); return end
+    if #hl.get_windows() > count_before then
+        cb(most_recent_addr())
     else
-        helpers.delay(0.05, function()
-            poll_for_new_window(count_before, attempts_left - 1, cb)
-        end)
+        helpers.delay(0.05, function() poll_for_new_window(count_before, attempts - 1, cb) end)
     end
 end
 
----Spawn a new dropdown terminal (async)
----@param terminal_cmd string The terminal command to run
----@param cb function Called with (success: boolean)
-local function spawn_dropdown_terminal(terminal_cmd, cb)
-    local pos = calculate_dropdown_position()
-    local active_ws = hl.get_active_workspace()
-    local current_ws = active_ws and active_ws.id or 1
+local function spawn_dropdown(term_cmd, cb)
+    local pos    = calc_dropdown_pos()
+    local cur_ws = (hl.get_active_workspace() or {}).id or 1
+    local before = #hl.get_windows()
 
-    local count_before = #hl.get_windows()
+    hl.exec_cmd(string.format("[float; size %d %d; workspace %s silent] %s",
+        pos.width, pos.height, SPECIAL_WS, term_cmd))
 
-    -- Launch the terminal hidden in the special workspace.
-    hl.exec_cmd(string.format(
-        "[float; size %d %d; workspace %s silent] %s",
-        pos.width, pos.height, SPECIAL_WORKSPACE, terminal_cmd
-    ))
-
-    poll_for_new_window(count_before, 20, function(new_addr)
+    poll_for_new_window(before, 20, function(addr)
         pcall(function()
-            if not new_addr or new_addr == "" then
-                cb(false)
-                return
-            end
+            if not addr then cb(false); return end
 
-            helpers.write_file(DROPDOWN_ADDR_FILE, string.format("%s %s", new_addr, pos.monitor_name))
+            state.set("dropdown_addr",    addr)
+            state.set("dropdown_monitor", pos.monitor)
 
-            hl.dispatch(hl.dsp.window.move({
-                workspace = current_ws, silent = true, window = "address:" .. new_addr,
-            }))
-            hl.dispatch(hl.dsp.window.pin({ window = "address:" .. new_addr }))
-
-            animate_slide_down(new_addr, pos.x, pos.y, pos.width, pos.height)
-
+            hl.dispatch(hl.dsp.window.move({ workspace = cur_ws, silent = true, window = "address:" .. addr }))
+            hl.dispatch(hl.dsp.window.pin({ window = "address:" .. addr }))
+            hl.dispatch(hl.dsp.window.move({ x = pos.x, y = pos.y, relative = false, window = "address:" .. addr }))
             cb(true)
         end)
     end)
 end
 
----Toggle the dropdown terminal
--- Creates a floating terminal that slides down from the top
--- Can be hidden to a special scratchpad workspace
--- @function toggle_dropdown
 function system.toggle_dropdown()
     helpers.safe_call("Dropdown terminal failed", function()
-        local terminal_cmd = os.getenv("TERMINAL") or "kitty"
-        local addr = get_dropdown_address()
+        local term = os.getenv("TERMINAL") or "kitty"
+        local addr = dropdown_addr()
 
         if addr and dropdown_exists(addr) then
-            local window_sel = "address:" .. addr
-            local active_ws = hl.get_active_workspace()
-            local current_ws = active_ws and active_ws.id or 1
+            local win_sel  = "address:" .. addr
+            local cur_ws   = (hl.get_active_workspace() or {}).id or 1
+            local cur_mon  = (hl.get_active_monitor() or {}).name or ""
+            local prev_mon = dropdown_monitor() or ""
 
-            local active_monitor = hl.get_active_monitor()
-            local focused_monitor = active_monitor and active_monitor.name or ""
-            local dropdown_monitor = get_dropdown_monitor() or ""
-
-            if focused_monitor ~= "" and focused_monitor ~= dropdown_monitor then
-                local pos = calculate_dropdown_position()
-                move_window_to(addr, pos.x, pos.y)
-                resize_window_to(addr, pos.width, pos.height)
-                helpers.write_file(DROPDOWN_ADDR_FILE, string.format("%s %s", addr, pos.monitor_name))
+            if cur_mon ~= "" and cur_mon ~= prev_mon then
+                local pos = calc_dropdown_pos()
+                hl.dispatch(hl.dsp.window.move({ x = pos.x, y = pos.y, relative = false, window = win_sel }))
+                hl.dispatch(hl.dsp.window.resize({ x = pos.width, y = pos.height, relative = false, window = win_sel }))
+                state.set("dropdown_monitor", pos.monitor)
             end
 
-            if dropdown_in_special(addr) then
-                local pos = calculate_dropdown_position()
-                hl.dispatch(hl.dsp.window.move({
-                    workspace = current_ws, silent = true, window = window_sel,
-                }))
-                hl.dispatch(hl.dsp.window.pin({ window = window_sel }))
-                resize_window_to(addr, pos.width, pos.height)
-                animate_slide_down(addr, pos.x, pos.y, pos.width, pos.height)
-                hl.dispatch(hl.dsp.focus({ window = window_sel }))
+            if in_special(addr) then
+                local pos = calc_dropdown_pos()
+                hl.dispatch(hl.dsp.window.move({ workspace = cur_ws, silent = true, window = win_sel }))
+                hl.dispatch(hl.dsp.window.pin({ window = win_sel }))
+                hl.dispatch(hl.dsp.window.resize({ x = pos.width, y = pos.height, relative = false, window = win_sel }))
+                hl.dispatch(hl.dsp.window.move({ x = pos.x, y = pos.y, relative = false, window = win_sel }))
+                hl.dispatch(hl.dsp.focus({ window = win_sel }))
             else
-                local geom = get_window_geometry(addr)
-
-                if geom then
-                    animate_slide_up(addr, geom.x, geom.y, geom.width, geom.height)
-                end
-
-                hl.dispatch(hl.dsp.window.pin({ window = window_sel })) -- toggle pin off
-                hl.dispatch(hl.dsp.window.move({
-                    workspace = SPECIAL_WORKSPACE, silent = true, window = window_sel,
-                }))
+                hl.dispatch(hl.dsp.window.pin({ window = win_sel }))
+                hl.dispatch(hl.dsp.window.move({ workspace = SPECIAL_WS, silent = true, window = win_sel }))
             end
         else
-            spawn_dropdown_terminal(terminal_cmd, function(spawn_success)
+            spawn_dropdown(term, function(ok)
                 pcall(function()
-                    if not spawn_success then
-                        notify.error("Failed to spawn dropdown terminal")
-                        return
-                    end
-
-                    local new_addr = get_dropdown_address()
-                    if new_addr then
-                        hl.dispatch(hl.dsp.focus({ window = "address:" .. new_addr }))
-                    end
+                    if not ok then notify.error("Failed to spawn dropdown terminal"); return end
+                    local new_addr = dropdown_addr()
+                    if new_addr then hl.dispatch(hl.dsp.focus({ window = "address:" .. new_addr })) end
                 end)
             end)
         end
@@ -564,197 +268,85 @@ end
 -- BATTERY STATUS
 -- ============================================
 
----Get battery status information from /sys/class/power_supply/
--- Reads capacity and status from all BAT* devices
--- Returns JSON formatted for Waybar integration
--- @return string JSON with text, class, and tooltip
--- @function battery_status
 function system.battery_status()
-    return helpers.safe_call_with_return(
-        "Battery status check failed",
-        function()
-            local batteries = {}
-            local total_capacity = 0
-            local battery_count = 0
-            local statuses = {}
-
-            -- Check for batteries BAT0 through BAT9
-            for i = 0, 9 do
-                local bat_path = string.format("/sys/class/power_supply/BAT%d", i)
-
-                -- Use the capacity file's existence as a proxy for "battery present".
-                local cap_data = helpers.read_file(bat_path .. "/capacity")
-                if cap_data then
-                    local capacity = tonumber(cap_data:match("%d+")) or 0
-                    local status_data = helpers.read_file(bat_path .. "/status")
-                    local status = status_data and status_data:gsub("%s+$", "") or "Unknown"
-
-                    table.insert(batteries, {
-                        index = i,
-                        capacity = capacity,
-                        status = status
-                    })
-
-                    total_capacity = total_capacity + capacity
-                    battery_count = battery_count + 1
-                    table.insert(statuses, status)
-                end
+    return helpers.safe_call("Battery status failed", function()
+        local bats, total, count, statuses = {}, 0, 0, {}
+        for i = 0, 9 do
+            local base = string.format("/sys/class/power_supply/BAT%d", i)
+            local cap  = helpers.read_file(base .. "/capacity")
+            if cap then
+                local c = tonumber(cap:match("%d+")) or 0
+                local s = helpers.trim(helpers.read_file(base .. "/status") or "Unknown")
+                table.insert(bats, { index = i, capacity = c, status = s })
+                total = total + c; count = count + 1
+                table.insert(statuses, s)
             end
+        end
 
-            if battery_count == 0 then
-                return '{"text": "N/A", "class": "unknown", "tooltip": "No battery found"}'
+        if count == 0 then
+            return '{"text":"N/A","class":"unknown","tooltip":"No battery found"}'
+        end
+
+        local avg   = math.floor(total / count)
+        local class = avg > 60 and "good" or avg >= 20 and "medium" or "low"
+
+        local tooltip
+        if count == 1 then
+            tooltip = string.format("Battery: %d%% (%s)", bats[1].capacity, bats[1].status)
+        else
+            local parts = {}
+            for _, b in ipairs(bats) do
+                table.insert(parts, string.format("Battery %d: %d%% (%s)", b.index, b.capacity, b.status))
             end
+            tooltip = table.concat(parts, "\n")
+        end
 
-            -- Calculate average capacity and determine overall status
-            local avg_capacity = math.floor(total_capacity / battery_count)
-            local overall_status = statuses[1] or "Unknown"
-
-            -- Determine class based on capacity
-            local class
-            if avg_capacity > 60 then
-                class = "good"
-            elseif avg_capacity >= 20 then
-                class = "medium"
-            else
-                class = "low"
-            end
-
-            -- Build tooltip
-            local tooltip_parts = {}
-            for _, bat in ipairs(batteries) do
-                table.insert(tooltip_parts, string.format("Battery %d: %d%% (%s)", bat.index, bat.capacity, bat.status))
-            end
-
-            local tooltip = table.concat(tooltip_parts, "\n")
-            if battery_count == 1 then
-                tooltip = string.format("Battery: %d%% (%s)", batteries[1].capacity, batteries[1].status)
-            end
-
-            -- Build JSON
-            local json = string.format(
-                '{"text": "%d%%", "class": "%s", "tooltip": "%s"}',
-                avg_capacity,
-                class,
-                tooltip:gsub("\"", "\\\"")
-            )
-
-            return json
-        end,
-        '{"text": "ERR", "class": "error", "tooltip": "Failed to read battery status"}'
-    )
+        return string.format('{"text":"%d%%","class":"%s","tooltip":"%s"}',
+            avg, class, tooltip:gsub('"', '\\"'))
+    end, '{"text":"ERR","class":"error","tooltip":"Failed to read battery"}')
 end
 
 -- ============================================
--- SYSTEM UPTIME
+-- UPTIME
 -- ============================================
 
----Read and format system uptime from /proc/uptime
--- Returns a human-readable string like "3 days, 2 hours, 15 minutes"
--- Removes plural suffixes when value is 1, hides empty fields
--- @return string Formatted uptime string
--- @function uptime
 function system.uptime()
-    return helpers.safe_call_with_return(
-        "Uptime check failed",
-        function()
-            local data = helpers.read_file("/proc/uptime")
+    return helpers.safe_call("Uptime check failed", function()
+        local data = helpers.read_file("/proc/uptime")
+        if not data then return "Error: could not read uptime" end
 
-            if not data then
-                return "Error: Could not read uptime"
-            end
+        local secs  = tonumber(data:match("^(%d+)")) or 0
+        local days  = math.floor(secs / 86400)
+        local hours = math.floor((secs % 86400) / 3600)
+        local mins  = math.floor((secs % 3600) / 60)
 
-            -- Parse uptime (first number is seconds)
-            local uptime_seconds = tonumber(data:match("^(%d+)")) or 0
+        local parts = {}
+        if days  > 0 then table.insert(parts, days  .. (days  == 1 and " day"    or " days"))    end
+        if hours > 0 then table.insert(parts, hours .. (hours == 1 and " hour"   or " hours"))   end
+        if mins  > 0 then table.insert(parts, mins  .. (mins  == 1 and " minute" or " minutes")) end
 
-            if uptime_seconds == 0 then
-                return "up 0 seconds"
-            end
-
-            -- Calculate days, hours, minutes
-            local days = math.floor(uptime_seconds / 86400)
-            local hours = math.floor((uptime_seconds % 86400) / 3600)
-            local minutes = math.floor((uptime_seconds % 3600) / 60)
-
-            -- Build parts array
-            local parts = {}
-
-            if days > 0 then
-                local day_str = days == 1 and "day" or "days"
-                table.insert(parts, string.format("%d %s", days, day_str))
-            end
-
-            if hours > 0 then
-                local hour_str = hours == 1 and "hour" or "hours"
-                table.insert(parts, string.format("%d %s", hours, hour_str))
-            end
-
-            if minutes > 0 then
-                local min_str = minutes == 1 and "minute" or "minutes"
-                table.insert(parts, string.format("%d %s", minutes, min_str))
-            end
-
-            -- Join parts with commas
-            local uptime_str = table.concat(parts, ", ")
-
-            if uptime_str == "" then
-                return "up < 1 minute"
-            end
-
-            return "up " .. uptime_str
-        end,
-        "Error: Failed to read uptime"
-    )
+        return "up " .. (table.concat(parts, ", ") ~= "" and table.concat(parts, ", ") or "< 1 minute")
+    end, "Error: failed to read uptime")
 end
 
 -- ============================================
 -- APPLICATION LAUNCHERS
 -- ============================================
 
----Launch the default terminal emulator
----@function terminal
-function system.terminal()
-    hl.exec_cmd(TERMINAL)
-end
-
----Launch the default file manager
----@function file_manager
-function system.file_manager()
-    hl.exec_cmd(FILE_MANAGER)
-end
-
----Open btop system monitor in a terminal window
----@function btop
-function system.btop()
-    hl.exec_cmd(TERMINAL .. " --title btop sh -c 'btop'")
-end
-
----Open nvtop GPU monitor in a terminal window
----@function nvtop
-function system.nvtop()
-    hl.exec_cmd(TERMINAL .. " --title nvtop sh -c 'nvtop'")
-end
-
----Open nmtui network manager in a terminal window
----@function nmtui
-function system.nmtui()
-    hl.exec_cmd(TERMINAL .. " nmtui")
-end
+function system.terminal()    hl.exec_cmd(TERMINAL) end
+function system.file_manager() hl.exec_cmd(FILE_MGR) end
+function system.btop()  hl.exec_cmd(TERMINAL .. " --title btop sh -c 'btop'") end
+function system.nvtop() hl.exec_cmd(TERMINAL .. " --title nvtop sh -c 'nvtop'") end
+function system.nmtui() hl.exec_cmd(TERMINAL .. " nmtui") end
 
 -- ============================================
 -- XDG DESKTOP PORTALS
 -- ============================================
 
----Start XDG Desktop Portals for Hyprland
--- Kills any existing portal processes and starts fresh ones.
--- Chains kills and starts via exec_async to keep sleep outside the event loop.
--- @function start_portals
 function system.start_portals()
     helpers.exec_async(
-        "killall xdg-desktop-portal-hyprland 2>/dev/null; " ..
-        "killall xdg-desktop-portal-wlr 2>/dev/null; " ..
-        "killall xdg-desktop-portal-gnome 2>/dev/null; " ..
-        "killall xdg-desktop-portal 2>/dev/null; " ..
-        "sleep 1",
+        "killall xdg-desktop-portal-hyprland xdg-desktop-portal-wlr "
+        .. "xdg-desktop-portal-gnome xdg-desktop-portal 2>/dev/null; sleep 1",
         function(_, _)
             pcall(function()
                 hl.exec_cmd("/usr/lib/xdg-desktop-portal-hyprland 2>/dev/null &")

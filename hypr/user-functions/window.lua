@@ -1,57 +1,25 @@
----
--- Window Management Functions
--- Provides window control, game mode, and layout toggling
---
--- @module user-functions.window
--- @author Brett
--- @license MIT
+-- Window management: kill, game mode, layout toggle.
 
-local window = {}
+local window  = {}
 local helpers = require("utils.helpers")
-local notify = require("utils.notify")
+local notify  = require("utils.notify")
+local icons   = require("utils.icons")
 
--- Load refresh module for internal refresh functions
-local refresh = require("utils.refresh")
-
--- ============================================
--- CONFIGURATION
--- ============================================
-
-local IMAGE_DIR = os.getenv("HOME") .. "/.config/swaync/images"
-local SCRIPT_DIR = os.getenv("HOME") .. "/.config/hypr/scripts"
-local WALLPAPER_PATH = os.getenv("HOME") .. "/.config/rofi/.current_wallpaper"
-
-local ICON = IMAGE_DIR .. "/ja.png"
-
--- Holds the runtime "force opacity 1" rule installed by enable_game_mode so
--- disable_game_mode can remove it without reloading the whole config.
+-- Runtime state for game mode (module-level; survives across calls in a session).
 local game_mode_opacity_rule = nil
-
--- Snapshot of pre-game-mode config values, so disable_game_mode can restore
--- exactly what was active rather than trying to guess defaults.
-local game_mode_saved = nil
+local game_mode_saved        = nil
 
 -- ============================================
--- ACTIVE WINDOW FUNCTIONS
+-- KILL ACTIVE
 -- ============================================
 
----Kill the active window's process
--- Reads the PID from hl.get_active_window() and sends SIGTERM via `kill`.
--- @function kill_active
 function window.kill_active()
     helpers.safe_call("Kill active process failed", function()
-        local active = hl.get_active_window()
-
-        if not active or not active.pid or active.pid == 0 then
-            notify.error("No active window found")
-            return
+        local w = hl.get_active_window()
+        if not w or not w.pid or w.pid == 0 then
+            notify.error("No active window found"); return
         end
-
-        local kill_result = helpers.exec("kill " .. tostring(active.pid))
-
-        if not kill_result.success then
-            notify.error("Failed to kill process", kill_result.stderr)
-        end
+        helpers.exec("kill " .. tostring(w.pid))
     end)
 end
 
@@ -59,25 +27,7 @@ end
 -- GAME MODE
 -- ============================================
 
----Check if animations are currently enabled
--- @return boolean True if animations are enabled, false otherwise
-local function is_animations_enabled()
-    local success, enabled = pcall(function()
-        return hl.config.animations.enabled
-    end)
-
-    if not success then
-        return true
-    end
-
-    return enabled
-end
-
----Enable game mode by disabling animations and effects
--- Disables: animations, shadows, blur, gaps; sets border_size=1, rounding=0
--- Kills swww daemon for performance
 local function enable_game_mode()
-    -- Snapshot current values so disable_game_mode can restore them exactly.
     local snap_ok, snap = pcall(function()
         return {
             animations  = hl.config.animations.enabled,
@@ -89,52 +39,37 @@ local function enable_game_mode()
             rounding    = hl.config.decoration.rounding,
         }
     end)
-    if snap_ok then
-        game_mode_saved = snap
-    end
+    if snap_ok then game_mode_saved = snap end
 
-    local success, err = pcall(function()
-        hl.config.animations.enabled = false
-        hl.config.decoration.shadow.enabled = false
-        hl.config.decoration.blur.enabled = false
-        hl.config.general.gaps_in = 0
-        hl.config.general.gaps_out = 0
-        hl.config.general.border_size = 1
-        hl.config.decoration.rounding = 0
+    pcall(function()
+        hl.config.animations.enabled          = false
+        hl.config.decoration.shadow.enabled   = false
+        hl.config.decoration.blur.enabled     = false
+        hl.config.general.gaps_in             = 0
+        hl.config.general.gaps_out            = 0
+        hl.config.general.border_size         = 1
+        hl.config.decoration.rounding         = 0
     end)
 
-    if not success then
-        notify.error("Game mode: Failed to apply settings", tostring(err))
-    end
-
-    -- Force opacity 1 on every window (active/inactive/fullscreen) for perf.
-    -- " override" sets absolute instead of multiplied; see window-rules.
     if not game_mode_opacity_rule then
         game_mode_opacity_rule = hl.window_rule({
-            match = { class = "^(.*)$" },
+            match   = { class = "^(.*)$" },
             opacity = "1 override 1 override 1 override",
         })
     end
 
-    -- Kill swww
     hl.exec_cmd("swww kill")
-
-    -- Send notification
-    notify.send({
-        text = "Gamemode: enabled",
-        icon = ICON,
-        timeout = 2000
-    })
+    notify.send({ text = "Gamemode: on", icon = icons.system.info, timeout = 2000 })
 end
 
----Disable game mode by restoring the snapshotted settings.
 local function disable_game_mode()
+    local wallpaper_path = os.getenv("HOME") .. "/.config/rofi/.current_wallpaper"
+
     helpers.exec_async(
-        string.format("swww-daemon --format xrgb && swww img '%s'", WALLPAPER_PATH),
+        string.format("swww-daemon --format xrgb && swww img %s", helpers.shquote(wallpaper_path)),
         function(_, _)
             pcall(function()
-                local wallpaper = require("user-functions.wallpaper")
-                wallpaper.apply_wallust()
+                require("user-functions.wallpaper").apply_wallust()
 
                 if game_mode_opacity_rule and game_mode_opacity_rule.set_enabled then
                     pcall(function() game_mode_opacity_rule:set_enabled(false) end)
@@ -142,38 +77,30 @@ local function disable_game_mode()
                 end
 
                 if game_mode_saved then
-                    local saved = game_mode_saved
+                    local s = game_mode_saved
                     pcall(function()
-                        hl.config.animations.enabled = saved.animations
-                        hl.config.decoration.shadow.enabled = saved.shadow
-                        hl.config.decoration.blur.enabled = saved.blur
-                        hl.config.general.gaps_in = saved.gaps_in
-                        hl.config.general.gaps_out = saved.gaps_out
-                        hl.config.general.border_size = saved.border_size
-                        hl.config.decoration.rounding = saved.rounding
+                        hl.config.animations.enabled          = s.animations
+                        hl.config.decoration.shadow.enabled   = s.shadow
+                        hl.config.decoration.blur.enabled     = s.blur
+                        hl.config.general.gaps_in             = s.gaps_in
+                        hl.config.general.gaps_out            = s.gaps_out
+                        hl.config.general.border_size         = s.border_size
+                        hl.config.decoration.rounding         = s.rounding
                     end)
                     game_mode_saved = nil
                 end
 
-                refresh.refresh_ui()
-
-                notify.send({
-                    text = "Gamemode: disabled",
-                    icon = ICON,
-                    timeout = 2000,
-                })
+                require("utils.refresh").refresh_ui()
+                notify.send({ text = "Gamemode: off", icon = icons.system.info, timeout = 2000 })
             end)
         end
     )
 end
 
----Toggle game mode on/off
--- When enabling: disables animations, shadows, blur, gaps; kills swww
--- When disabling: restarts swww and reloads config
--- @function game_mode
 function window.game_mode()
     helpers.safe_call("Game mode toggle failed", function()
-        if is_animations_enabled() then
+        local ok, enabled = pcall(function() return hl.config.animations.enabled end)
+        if (ok and enabled) or not ok then
             enable_game_mode()
         else
             disable_game_mode()
@@ -185,79 +112,27 @@ end
 -- LAYOUT TOGGLE
 -- ============================================
 
----Get the current layout from Hyprland
--- @return string The current layout name ("master" or "dwindle")
-local function get_current_layout()
-    local success, layout = pcall(function()
-        return hl.config.general.layout
-    end)
-
-    if not success then
-        return "dwindle"
-    end
-
-    return layout
-end
-
----Switch to dwindle layout and rebind J/K/O for window cycling.
 local function switch_to_dwindle()
-    hl.unbind("SUPER + J")
-    hl.unbind("SUPER + K")
-    hl.unbind("SUPER + O")
-
-    local ok, err = pcall(function()
-        hl.config.general.layout = "dwindle"
-    end)
-    if not ok then
-        notify.error("Failed to switch layout", tostring(err))
-    end
-
+    hl.unbind("SUPER + J"); hl.unbind("SUPER + K"); hl.unbind("SUPER + O")
+    pcall(function() hl.config.general.layout = "dwindle" end)
     hl.bind("SUPER + J", hl.dsp.window.cycle_next())
     hl.bind("SUPER + K", hl.dsp.window.cycle_next({ prev = true }))
     hl.bind("SUPER + O", hl.dsp.layout("togglesplit"))
-
-    notify.send({
-        text = "Dwindle Layout",
-        icon = ICON,
-        timeout = 2000,
-    })
+    notify.send({ text = "Dwindle layout", icon = icons.system.info, timeout = 2000 })
 end
 
----Switch to master layout and rebind J/K for master-layout cycling.
 local function switch_to_master()
-    hl.unbind("SUPER + J")
-    hl.unbind("SUPER + K")
-    hl.unbind("SUPER + O")
-
-    local ok, err = pcall(function()
-        hl.config.general.layout = "master"
-    end)
-    if not ok then
-        notify.error("Failed to switch layout", tostring(err))
-    end
-
+    hl.unbind("SUPER + J"); hl.unbind("SUPER + K"); hl.unbind("SUPER + O")
+    pcall(function() hl.config.general.layout = "master" end)
     hl.bind("SUPER + J", hl.dsp.layout("cyclenext"))
     hl.bind("SUPER + K", hl.dsp.layout("cycleprev"))
-
-    notify.send({
-        text = "Master Layout",
-        icon = ICON,
-        timeout = 2000,
-    })
+    notify.send({ text = "Master layout", icon = icons.system.info, timeout = 2000 })
 end
 
----Toggle between master and dwindle layouts
--- Automatically switches layout and rebinds navigation keys appropriately
--- @function layout_toggle
 function window.layout_toggle()
     helpers.safe_call("Layout toggle failed", function()
-        local current_layout = get_current_layout()
-
-        if current_layout == "master" then
-            switch_to_dwindle()
-        else
-            switch_to_master()
-        end
+        local ok, layout = pcall(function() return hl.config.general.layout end)
+        if ok and layout == "master" then switch_to_dwindle() else switch_to_master() end
     end)
 end
 

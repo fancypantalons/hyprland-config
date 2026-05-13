@@ -192,28 +192,15 @@ function helpers.mkdir_p(path)
 end
 
 ---Execute a function with automatic error handling.
--- Wraps fn in pcall and shows notification on failure.
--- For functions that don't return values.
---
--- @param error_context string The error message prefix (e.g., "Kill active process failed")
--- @param fn function The function to execute
-function helpers.safe_call(error_context, fn)
-    local success, err = pcall(fn)
-    if not success then
-        local notify = require("utils.notify")
-        notify.error(error_context, tostring(err))
-    end
-end
-
----Execute a function with automatic error handling, returning a value.
--- Wraps fn in pcall and returns result on success, default_value on failure.
--- For functions that return values (like status functions).
+-- Wraps fn in pcall; shows a notification on failure and returns default_value.
+-- When default_value is omitted the function still returns nil on error.
+-- safe_call_with_return is kept as an alias for backward compatibility.
 --
 -- @param error_context string The error message prefix
--- @param fn function The function to execute (must return a value)
--- @param default_value any The value to return on error
--- @return any The result of fn() on success, default_value on failure
-function helpers.safe_call_with_return(error_context, fn, default_value)
+-- @param fn function The function to execute
+-- @param default_value any (optional) Value to return on error
+-- @return any Result of fn() on success, default_value (or nil) on failure
+function helpers.safe_call(error_context, fn, default_value)
     local success, result = pcall(fn)
     if not success then
         local notify = require("utils.notify")
@@ -221,6 +208,22 @@ function helpers.safe_call_with_return(error_context, fn, default_value)
         return default_value
     end
     return result
+end
+
+helpers.safe_call_with_return = helpers.safe_call
+
+---Trim trailing whitespace from a string.
+-- @param s string
+-- @return string
+function helpers.trim(s)
+    return (s or ""):gsub("%s+$", "")
+end
+
+---Single-quote a string for safe shell embedding.
+-- @param s any Value to quote (coerced to string)
+-- @return string Shell-safe single-quoted string
+function helpers.shquote(s)
+    return "'" .. tostring(s):gsub("'", [['\'']]) .. "'"
 end
 
 ---Decode an XKB modifier bitmask into an ordered list of modifier name strings.

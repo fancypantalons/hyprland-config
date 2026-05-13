@@ -1,160 +1,72 @@
----
--- Internal Refresh Utilities
--- Internal refresh utilities (not user-facing)
--- Handles killing processes, restarting services, and refreshing the UI
---
--- @module utils.refresh
--- @author Brett
--- @license MIT
+-- UI refresh utilities: restart waybar, ags, swaync, and optional extras.
 
 local refresh = {}
 local helpers = require("utils.helpers")
+local proc    = require("utils.proc")
 
--- ============================================
--- CONFIGURATION
--- ============================================
+local HOME        = os.getenv("HOME")
+local SCRIPTS_DIR = HOME .. "/.config/hypr/scripts"
 
-local HOME = os.getenv("HOME")
-local SCRIPTSDIR = HOME .. "/.config/hypr/scripts"
-local USERSCRIPTS = HOME .. "/.config/hypr/scripts"
-
--- ============================================
--- HELPER FUNCTIONS
--- ============================================
-
----Check if a command exists
--- @param cmd string The command to check
--- @return boolean True if the command exists
-local function command_exists(cmd)
-    local result = helpers.exec("command -v " .. cmd .. " 2>/dev/null")
-
-    return result.success and result.stdout ~= ""
-end
-
----Kill a process by name if it's running
--- @param process string The process name to kill
-local function kill_process(process)
-    hl.exec_cmd("pkill " .. process .. " 2>/dev/null || true")
-end
-
----Check if a process is running
--- @param process string The process name to check
--- @return boolean True if the process is running
-local function is_running(process)
-    local result = helpers.exec("pidof " .. process .. " 2>/dev/null")
-
-    return result.success and result.stdout ~= ""
-end
-
----Send SIGUSR1 signal to a process
--- @param process string The process name
-local function signal_usr1(process)
-    hl.exec_cmd("killall -SIGUSR1 " .. process .. " 2>/dev/null || true")
-end
-
----Check if a file exists
--- @param path string The file path to check
--- @return boolean True if the file exists
-local function file_exists(path)
-    return helpers.path_exists(path)
-end
-
--- ============================================
--- REFRESH FUNCTIONS
--- ============================================
-
----Full refresh of the UI
--- Kills rofi, restarts ags, runs wallust, reloads swaync, restarts waybar.
--- Optional cb is called after all steps complete.
--- @param cb function|nil Optional completion callback
--- @function refresh_ui
-function refresh.refresh_ui(cb)
-    local notify = require("utils.notify")
-
-    for _, proc in ipairs({"waybar", "rofi", "swaync", "ags"}) do
-        kill_process(proc)
+-- Chain {async=, cmd=, fn=, delay=} steps, calling cb when all complete.
+local function seq(steps, cb)
+    local function run(i)
+        if i > #steps then if cb then pcall(cb) end; return end
+        local s = steps[i]
+        if s.delay then
+            helpers.delay(s.delay, function() pcall(run, i + 1) end)
+        elseif s.async then
+            helpers.exec_async(s.async, function() pcall(run, i + 1) end)
+        elseif s.fn then
+            s.fn(); run(i + 1)
+        elseif s.cmd then
+            hl.exec_cmd(s.cmd); run(i + 1)
+        end
     end
-
-    hl.exec_cmd("killall -SIGUSR2 waybar 2>/dev/null || true")
-
-    helpers.exec_async("ags -q 2>/dev/null || true; sleep 0.1", function(_, _)
-        pcall(function()
-            hl.exec_cmd("ags &")
-
-            local signal_procs = { "waybar", "rofi", "swaync", "ags", "swaybg" }
-
-            for _, proc in ipairs(signal_procs) do
-                if is_running(proc) then
-                    signal_usr1(proc)
-                end
-            end
-
-            helpers.delay(1, function()
-                pcall(function()
-                    hl.exec_cmd("waybar &")
-
-                    helpers.delay(0.5, function()
-                        pcall(function()
-                            hl.exec_cmd("swaync > /dev/null 2>&1 &")
-
-                            helpers.delay(0.2, function()
-                                pcall(function()
-                                    hl.exec_cmd("swaync-client --reload-config")
-
-                                    helpers.delay(1, function()
-                                        pcall(function()
-                                            if file_exists(USERSCRIPTS .. "/RainbowBorders.sh") then
-                                                hl.exec_cmd(USERSCRIPTS .. "/RainbowBorders.sh &")
-                                            end
-
-                                            if cb then
-                                                cb()
-                                            end
-                                        end)
-                                    end)
-                                end)
-                            end)
-                        end)
-                    end)
-                end)
-            end)
-        end)
-    end)
+    pcall(run, 1)
 end
 
----Refresh UI without restarting waybar
--- Same as refresh_ui but skips waybar restart. Optional cb called on completion.
--- @param cb function|nil Optional completion callback
--- @function refresh_ui_no_waybar
+local function rainbow_borders()
+    local path = SCRIPTS_DIR .. "/RainbowBorders.sh"
+    if helpers.file_exists(path) then hl.exec_cmd(path .. " &") end
+end
+
+-- Full UI restart: ags + waybar + swaync + optional RainbowBorders.
+function refresh.refresh_ui(cb)
+    for _, p in ipairs({"waybar", "rofi", "swaync", "ags"}) do proc.kill(p) end
+    proc.signal("waybar", "SIGUSR2")
+
+    seq({
+        { async = "ags -q 2>/dev/null || true; sleep 0.1" },
+        { cmd   = "ags &" },
+        { fn    = function()
+            for _, p in ipairs({"waybar", "rofi", "swaync", "ags", "swaybg"}) do
+                if proc.running(p) then proc.signal(p, "SIGUSR1") end
+            end
+          end },
+        { delay = 1   },
+        { cmd   = "waybar &" },
+        { delay = 0.5 },
+        { cmd   = "swaync > /dev/null 2>&1 &" },
+        { delay = 0.2 },
+        { cmd   = "swaync-client --reload-config" },
+        { delay = 1   },
+        { fn    = rainbow_borders },
+    }, cb)
+end
+
+-- Refresh without restarting waybar (used after wallpaper/wallust changes).
 function refresh.refresh_ui_no_waybar(cb)
-    kill_process("rofi")
+    proc.kill("rofi")
 
-    helpers.exec_async("ags -q 2>/dev/null || true; sleep 0.1", function(_, _)
-        pcall(function()
-            hl.exec_cmd("ags &")
-
-            local wallpaper = require("user-functions.wallpaper")
-            wallpaper.apply_wallust()
-
-            helpers.delay(0.2, function()
-                pcall(function()
-                    hl.exec_cmd("swaync-client --reload-config")
-
-                    helpers.delay(1, function()
-                        pcall(function()
-                            if file_exists(USERSCRIPTS .. "/RainbowBorders.sh") then
-                                hl.exec_cmd(USERSCRIPTS .. "/RainbowBorders.sh &")
-                            end
-
-                            if cb then
-                                cb()
-                            end
-                        end)
-                    end)
-                end)
-            end)
-        end)
-    end)
+    seq({
+        { async = "ags -q 2>/dev/null || true; sleep 0.1" },
+        { cmd   = "ags &" },
+        { fn    = function() require("user-functions.wallpaper").apply_wallust() end },
+        { delay = 0.2 },
+        { cmd   = "swaync-client --reload-config" },
+        { delay = 1   },
+        { fn    = rainbow_borders },
+    }, cb)
 end
 
 return refresh

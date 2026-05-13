@@ -1,861 +1,423 @@
----
--- Wallpaper Control Functions
--- Provides wallpaper selection, effects, randomization, and auto-rotation
---
--- All functions support both image and video wallpapers
--- Uses swww for images and mpvpaper for videos
---
--- @module user-functions.wallpaper
--- @author Brett
--- @license MIT
+-- Wallpaper control: selection, effects, randomisation, wallust colour extraction,
+-- auto-rotation daemon, and optional SDDM background sync.
 
 local wallpaper = {}
-local helpers = require("utils.helpers")
-local notify = require("utils.notify")
-
--- Load refresh module for internal refresh functions
-local refresh = require("utils.refresh")
-
--- ============================================
--- CONFIGURATION
--- ============================================
+local helpers   = require("utils.helpers")
+local notify    = require("utils.notify")
+local proc      = require("utils.proc")
+local refresh   = require("utils.refresh")
 
 local HOME = os.getenv("HOME")
 
 local PATHS = {
-    wallpapers = HOME .. "/Pictures/wallpapers",
-    swww_cache = HOME .. "/.cache/swww",
-    rofi_current = HOME .. "/.config/rofi/.current_wallpaper",
+    wallpapers        = HOME .. "/Pictures/wallpapers",
+    swww_cache        = HOME .. "/.cache/swww",
+    rofi_current      = HOME .. "/.config/rofi/.current_wallpaper",
     wallpaper_current = HOME .. "/.config/hypr/wallpaper_effects/.wallpaper_current",
-    wallpaper_modified = HOME .. "/.config/hypr/wallpaper_effects/.wallpaper_modified",
-    gif_cache = HOME .. "/.cache/gif_preview",
-    video_cache = HOME .. "/.cache/video_preview",
-    scripts_dir = HOME .. "/.config/hypr/scripts",
-    rofi_theme = HOME .. "/.config/rofi/config-wallpaper.rasi",
+    wallpaper_modified= HOME .. "/.config/hypr/wallpaper_effects/.wallpaper_modified",
+    gif_cache         = HOME .. "/.cache/gif_preview",
+    video_cache       = HOME .. "/.cache/video_preview",
+    rofi_theme        = HOME .. "/.config/rofi/config-wallpaper.rasi",
     rofi_effect_theme = HOME .. "/.config/rofi/config-wallpaper-effect.rasi",
-    swaync_images = HOME .. "/.config/swaync/images",
+    scripts_dir       = HOME .. "/.config/hypr/scripts",
     sddm_themes = {
         "/usr/share/sddm/themes",
-        "/run/current-system/sw/share/sddm/themes"
-    }
+        "/run/current-system/sw/share/sddm/themes",
+    },
 }
 
-local SWWW_PARAMS = {
-    fps = 60,
-    type = "any",
-    duration = 2,
-    bezier = ".43,1.19,1,.4"
-}
-
+local SWWW = { fps = 60, type = "any", duration = 2, bezier = ".43,1.19,1,.4" }
 local AUTO_CHANGE_INTERVAL = 1800
 
-local IMAGE_EXTENSIONS = {
-    "jpg", "jpeg", "png", "gif", "bmp",
-    "tiff", "webp", "pnm", "tga", "farbfeld"
-}
-
-local VIDEO_EXTENSIONS = {
-    "mp4", "mkv", "mov", "webm"
-}
+local IMAGE_EXTS = { "jpg","jpeg","png","gif","bmp","tiff","webp","pnm","tga","farbfeld" }
+local VIDEO_EXTS = { "mp4","mkv","mov","webm" }
 
 -- ============================================
--- HELPER FUNCTIONS
+-- INTERNAL HELPERS
 -- ============================================
 
----Get the currently focused monitor name
--- @return string|nil The monitor name, or nil on error
-local function get_focused_monitor()
+local function focused_monitor()
     local m = hl.get_active_monitor()
     return m and m.name or nil
 end
 
----Kill all wallpaper daemon processes
--- Stops swww, mpvpaper, swaybg, and hyprpaper
-local function kill_wallpaper_daemons()
-    hl.exec_cmd("swww kill 2>/dev/null || true")
-    hl.exec_cmd("pkill mpvpaper 2>/dev/null || true")
-    hl.exec_cmd("pkill swaybg 2>/dev/null || true")
-    hl.exec_cmd("pkill hyprpaper 2>/dev/null || true")
-end
-
----Kill wallpaper daemons except swww
--- For image wallpapers, keep swww running
-local function kill_non_swww_daemons()
-    hl.exec_cmd("pkill mpvpaper 2>/dev/null || true")
-    hl.exec_cmd("pkill swaybg 2>/dev/null || true")
-    hl.exec_cmd("pkill hyprpaper 2>/dev/null || true")
-end
-
----Check if a command is available
--- @param cmd string The command to check
--- @return boolean True if the command exists
-local function command_exists(cmd)
-    local result = helpers.exec("command -v " .. cmd .. " 2>/dev/null")
-
-    return result.success and result.stdout ~= ""
-end
-
----Get list of wallpaper files
--- Searches the wallpapers directory for images and videos
--- @return table Array of wallpaper file paths
-local function get_wallpaper_list()
-    local wallpapers = {}
-    local find_pattern = ""
-
-    for _, ext in ipairs(IMAGE_EXTENSIONS) do
-        find_pattern = find_pattern .. " -o -iname '*." .. ext .. "'"
+local function is_video(path)
+    local lower = path:lower()
+    for _, ext in ipairs(VIDEO_EXTS) do
+        if lower:match("%." .. ext .. "$") then return true end
     end
-
-    for _, ext in ipairs(VIDEO_EXTENSIONS) do
-        find_pattern = find_pattern .. " -o -iname '*." .. ext .. "'"
-    end
-
-    find_pattern = find_pattern:sub(5)
-
-    local cmd = string.format(
-        "find -L '%s' -type f \\( %s \\) -print 2>/dev/null | sort",
-        PATHS.wallpapers,
-        find_pattern
-    )
-
-    local result = helpers.exec(cmd)
-
-    if not result.success then
-        return wallpapers
-    end
-
-    for line in result.stdout:gmatch("[^\r\n]+") do
-        table.insert(wallpapers, line)
-    end
-
-    return wallpapers
-end
-
----Check if a file is a video
--- @param filepath string The file path to check
--- @return boolean True if the file is a video
-local function is_video(filepath)
-    local lower = filepath:lower()
-
-    for _, ext in ipairs(VIDEO_EXTENSIONS) do
-        if (lower:match("%." .. ext .. "$") ~= nil) then
-            return true
-        end
-    end
-
     return false
 end
 
----Check if a file is a GIF
--- @param filepath string The file path to check
--- @return boolean True if the file is a GIF
-local function is_gif(filepath)
-    return filepath:lower():match("%.gif$") ~= nil
+local function is_gif(path) return path:lower():match("%.gif$") ~= nil end
+
+local function kill_wallpaper_daemons(keep_swww)
+    if not keep_swww then hl.exec_cmd("swww kill 2>/dev/null || true") end
+    hl.exec_cmd("pkill mpvpaper 2>/dev/null || true")
+    hl.exec_cmd("pkill swaybg   2>/dev/null || true")
+    hl.exec_cmd("pkill hyprpaper 2>/dev/null || true")
 end
 
----Generate a thumbnail for a GIF (synchronous, safe: no compositor IPC)
--- @param gif_path string Path to the GIF file
--- @return string Path to the generated thumbnail
-local function generate_gif_thumbnail(gif_path)
-    local basename = gif_path:match("([^/]+)$")
-    local cache_path = PATHS.gif_cache .. "/" .. basename .. ".png"
-
-    helpers.mkdir_p(PATHS.gif_cache)
-
-    if not helpers.path_exists(cache_path) then
-        helpers.exec(string.format(
-            "magick '%s[0]' -resize 1920x1080 '%s' 2>/dev/null || " ..
-            "convert '%s[0]' -resize 1920x1080 '%s' 2>/dev/null",
-            gif_path, cache_path, gif_path, cache_path
-        ))
-    end
-
-    return cache_path
+local function find_ext_pattern()
+    local parts = {}
+    for _, e in ipairs(IMAGE_EXTS) do table.insert(parts, "-iname '*." .. e .. "'") end
+    for _, e in ipairs(VIDEO_EXTS) do table.insert(parts, "-iname '*." .. e .. "'") end
+    return table.concat(parts, " -o ")
 end
 
----Generate a thumbnail for a video (synchronous, safe: no compositor IPC)
--- @param video_path string Path to the video file
--- @return string Path to the generated thumbnail
-local function generate_video_thumbnail(video_path)
-    local basename = video_path:match("([^/]+)$")
-    local cache_path = PATHS.video_cache .. "/" .. basename .. ".png"
-
-    helpers.mkdir_p(PATHS.video_cache)
-
-    if not helpers.path_exists(cache_path) then
-        helpers.exec(string.format(
-            "ffmpeg -v error -y -i '%s' -ss 00:00:01.000 -vframes 1 '%s' 2>/dev/null || true",
-            video_path, cache_path
-        ))
-    end
-
-    return cache_path
-end
-
----Build the rofi menu input
--- Creates a list of wallpapers with icons for rofi
--- @return string The menu input for rofi
-local function build_rofi_menu()
-    local wallpapers = get_wallpaper_list()
-    local menu_items = {}
-
-    if (#wallpapers == 0) then
-        return ""
-    end
-
-    local random_idx = math.random(1, #wallpapers)
-    local random_pic = wallpapers[random_idx]
-
-    table.insert(menu_items, string.format(". random\0icon\x1f%s", random_pic))
-
-    for _, pic_path in ipairs(wallpapers) do
-        local pic_name = pic_path:match("([^/]+)$")
-        local display_name = pic_name:gsub("%..-$", "")
-        local icon_path
-
-        if (is_gif(pic_path)) then
-            icon_path = generate_gif_thumbnail(pic_path)
-        elseif (is_video(pic_path)) then
-            icon_path = generate_video_thumbnail(pic_path)
-        else
-            icon_path = pic_path
-        end
-
-        table.insert(menu_items, string.format("%s\0icon\x1f%s", display_name, icon_path))
-    end
-
-    return table.concat(menu_items, "\n")
-end
-
----Get rofi icon size based on monitor
--- Calculates appropriate icon size for rofi menu
--- @return string The icon size CSS override
-local function get_rofi_icon_override()
-    local m = hl.get_active_monitor()
-
-    if not m then
-        return "element-icon{size:20%;}"
-    end
-
-    local icon_size = (m.height * 3) / (m.scale * 150)
-
-    if icon_size < 15 then
-        icon_size = 20
-    elseif icon_size > 25 then
-        icon_size = 25
-    end
-
-    return string.format("element-icon{size:%d%%;}", math.floor(icon_size))
-end
-
----After ensuring the swww daemon is running, apply the given image.
--- @param image_path string
--- @param target_monitor string
-local function swww_apply_after_daemon(image_path, target_monitor)
-    local swww_cmd = string.format(
-        "swww img -o %s '%s' --transition-fps %d --transition-type %s --transition-duration %d --transition-bezier %s",
-        target_monitor,
-        image_path,
-        SWWW_PARAMS.fps,
-        SWWW_PARAMS.type,
-        SWWW_PARAMS.duration,
-        SWWW_PARAMS.bezier
-    )
-
-    helpers.exec_async(swww_cmd, function(exit_code, _)
-        pcall(function()
-            if exit_code ~= 0 then
-                notify.error("Failed to apply wallpaper")
-
-                return
-            end
-
-            wallpaper.apply_wallust(image_path)
-            refresh.refresh_ui(function()
-                offer_sddm_wallpaper(false)
-            end)
-        end)
-    end)
-end
-
----Apply an image wallpaper using swww (async)
--- @param image_path string Path to the image file
--- @param monitor string The monitor to apply to (uses focused if nil)
-local offer_sddm_wallpaper
-local set_sddm_wallpaper
-local function apply_image_wallpaper(image_path, monitor)
-    local target_monitor = monitor or get_focused_monitor()
-
-    if not target_monitor then
-        notify.error("Failed to detect focused monitor")
-
-        return
-    end
-
-    kill_non_swww_daemons()
-
-    local daemon_check = helpers.exec("pgrep -x swww-daemon")
-
-    if daemon_check.success then
-        swww_apply_after_daemon(image_path, target_monitor)
-    else
-        hl.exec_cmd("swww-daemon --format xrgb &")
-        helpers.delay(0.5, function()
-            swww_apply_after_daemon(image_path, target_monitor)
-        end)
-    end
-end
-
----Apply a video wallpaper using mpvpaper
--- @param video_path string Path to the video file
-local function apply_video_wallpaper(video_path)
-
-    if not command_exists("mpvpaper") then
-        notify.error("mpvpaper not found", "Install mpvpaper for video wallpapers")
-
-        return
-    end
-
-    kill_wallpaper_daemons()
-
-    hl.exec_cmd(string.format(
-        "mpvpaper '*' -o 'load-scripts=no no-audio --loop' '%s' &",
-        video_path
+local function get_wallpaper_list()
+    local r = helpers.exec(string.format(
+        "find -L %s -type f \\( %s \\) -print 2>/dev/null | sort",
+        helpers.shquote(PATHS.wallpapers), find_ext_pattern()
     ))
-
-    notify.success("Video wallpaper applied")
+    if not r.success then return {} end
+    local list = {}
+    for line in r.stdout:gmatch("[^\r\n]+") do table.insert(list, line) end
+    return list
 end
 
----Offer to set wallpaper as SDDM background
--- Shows a yad dialog if simple_sddm_2 theme exists
--- @param is_effect boolean Whether this is an effect wallpaper
-offer_sddm_wallpaper = function(is_effect)
+local function gen_thumbnail(src, cache_dir, cmd_fmt)
+    local name  = src:match("([^/]+)$")
+    local cache = cache_dir .. "/" .. name .. ".png"
+    helpers.mkdir_p(cache_dir)
+    if not helpers.path_exists(cache) then helpers.exec(string.format(cmd_fmt, src, cache, src, cache)) end
+    return cache
+end
 
-    local sddm_dir = nil
+local function thumbnail(path)
+    if is_gif(path) then
+        return gen_thumbnail(path, PATHS.gif_cache,
+            "magick '%s[0]' -resize 1920x1080 '%s' 2>/dev/null || convert '%s[0]' -resize 1920x1080 '%s' 2>/dev/null")
+    elseif is_video(path) then
+        return gen_thumbnail(path, PATHS.video_cache,
+            "ffmpeg -v error -y -i '%s' -ss 00:00:01.000 -vframes 1 '%s' 2>/dev/null; true; true; true")
+    end
+    return path
+end
 
+local function sddm_theme_dir()
     for _, dir in ipairs(PATHS.sddm_themes) do
         if helpers.dir_exists(dir) then
-            sddm_dir = dir
-
-            break
+            local t = dir .. "/simple_sddm_2"
+            if helpers.dir_exists(t) and helpers.path_exists(t .. "/Backgrounds") then
+                return t
+            end
         end
     end
-
-    if not sddm_dir then
-        return
-    end
-
-    local simple_theme = sddm_dir .. "/simple_sddm_2"
-    local backgrounds_dir = simple_theme .. "/Backgrounds"
-
-    if not (helpers.dir_exists(simple_theme) and helpers.path_exists(backgrounds_dir)) then
-        return
-    end
-
-    hl.exec_cmd("pkill yad 2>/dev/null || true")
-
-    local yad_cmd = string.format(
-        "yad --info --text='Set current wallpaper as SDDM background?\\n\\nNOTE: This only applies to SIMPLE SDDM v2 Theme' " ..
-        "--text-align=left --title='SDDM Background' --timeout=5 --timeout-indicator=right " ..
-        "--button='yes:0' --button='no:1' 2>/dev/null"
-    )
-
-    helpers.exec_async(yad_cmd, function(exit_code, _)
-        pcall(function()
-            if exit_code ~= 0 then
-                return
-            end
-
-            if not command_exists("kitty") then
-                notify.error("Missing kitty", "Install kitty to enable setting SDDM background")
-
-                return
-            end
-
-            set_sddm_wallpaper(is_effect and "effects" or "normal")
-        end)
-    end)
-end
-
----Set SDDM wallpaper and colors
--- Internal helper to configure SDDM theme with current wallpaper and colors
--- Extracts colors from rofi wallust config and updates SDDM theme.conf
--- Copies wallpaper to SDDM backgrounds directory
--- Handles NixOS detection (skips on NixOS)
--- Launches kitty with sudo commands for privileged operations
--- @param mode string Either "normal" or "effects" to determine which wallpaper to use
-set_sddm_wallpaper = function(mode)
-
-    local sddm_dir = nil
-
-    for _, dir in ipairs(PATHS.sddm_themes) do
-        if helpers.dir_exists(dir) then
-            sddm_dir = dir
-
-            break
-        end
-    end
-
-    if not sddm_dir then
-        return
-    end
-
-    local simple_theme = sddm_dir .. "/simple_sddm_2"
-    local sddm_theme_conf = simple_theme .. "/theme.conf"
-    local rofi_wallust = HOME .. "/.config/rofi/wallust/colors-rofi.rasi"
-    local wallpaper_current = PATHS.wallpaper_current
-    local wallpaper_modified = PATHS.wallpaper_modified
-
-    -- Check if simple_sddm_2 theme exists
-    if not helpers.dir_exists(simple_theme) then
-        return
-    end
-
-    -- Detect NixOS and skip
-    local nixos_check = helpers.exec("hostnamectl 2>/dev/null | grep -q 'Operating System: NixOS'")
-
-    if nixos_check.success then
-        notify.info("NixOS detected: skipping SDDM background change")
-
-        return
-    end
-
-    -- Extract colors from rofi wallust config
-    local color0_result = helpers.exec("grep -oP 'color1:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-    local color1_result = helpers.exec("grep -oP 'color0:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-    local color7_result = helpers.exec("grep -oP 'color14:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-    local color10_result = helpers.exec("grep -oP 'color10:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-    local color12_result = helpers.exec("grep -oP 'color12:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-    local color13_result = helpers.exec("grep -oP 'color13:\\s*\\K#[A-Fa-f0-9]+' '" .. rofi_wallust .. "' 2>/dev/null")
-
-    local color0 = color0_result.success and color0_result.stdout:gsub("%s+$", "") or "#ffffff"
-    local color1 = color1_result.success and color1_result.stdout:gsub("%s+$", "") or "#000000"
-    local color7 = color7_result.success and color7_result.stdout:gsub("%s+$", "") or "#ffffff"
-    local color10 = color10_result.success and color10_result.stdout:gsub("%s+$", "") or "#ffffff"
-    local color12 = color12_result.success and color12_result.stdout:gsub("%s+$", "") or "#ffffff"
-    local color13 = color13_result.success and color13_result.stdout:gsub("%s+$", "") or "#ffffff"
-
-    -- Determine which wallpaper to use
-    local wallpaper_path = (mode == "effects") and wallpaper_modified or wallpaper_current
-
-    if not command_exists("kitty") then
-        notify.error("Missing kitty", "Install kitty to enable setting SDDM background")
-
-        return
-    end
-
-    -- Build the script to run with sudo
-    local script_content = string.format([[
-echo 'Enter your password to update SDDM wallpapers and colors'
-
-# Update the colors in the SDDM config
-sudo sed -i "s/HeaderTextColor=\"#.*\"/HeaderTextColor=\"%s\"/" "%s"
-sudo sed -i "s/DateTextColor=\"#.*\"/DateTextColor=\"%s\"/" "%s"
-sudo sed -i "s/TimeTextColor=\"#.*\"/TimeTextColor=\"%s\"/" "%s"
-sudo sed -i "s/DropdownSelectedBackgroundColor=\"#.*\"/DropdownSelectedBackgroundColor=\"%s\"/" "%s"
-sudo sed -i "s/SystemButtonsIconsColor=\"#.*\"/SystemButtonsIconsColor=\"%s\"/" "%s"
-sudo sed -i "s/SessionButtonTextColor=\"#.*\"/SessionButtonTextColor=\"%s\"/" "%s"
-sudo sed -i "s/VirtualKeyboardButtonTextColor=\"#.*\"/VirtualKeyboardButtonTextColor=\"%s\"/" "%s"
-sudo sed -i "s/HighlightBackgroundColor=\"#.*\"/HighlightBackgroundColor=\"%s\"/" "%s"
-sudo sed -i "s/LoginFieldTextColor=\"#.*\"/LoginFieldTextColor=\"%s\"/" "%s"
-sudo sed -i "s/PasswordFieldTextColor=\"#.*\"/PasswordFieldTextColor=\"%s\"/" "%s"
-
-sudo sed -i "s/DropdownBackgroundColor=\"#.*\"/DropdownBackgroundColor=\"%s\"/" "%s"
-sudo sed -i "s/HighlightTextColor=\"#.*\"/HighlightTextColor=\"%s\"/" "%s"
-
-sudo sed -i "s/PlaceholderTextColor=\"#.*\"/PlaceholderTextColor=\"%s\"/" "%s"
-sudo sed -i "s/UserIconColor=\"#.*\"/UserIconColor=\"%s\"/" "%s"
-sudo sed -i "s/PasswordIconColor=\"#.*\"/PasswordIconColor=\"%s\"/" "%s"
-
-# Copy wallpaper to SDDM theme
-sudo cp -f "%s" "%s/Backgrounds/default" || true
-
-# Fallbacks: if theme ships default.jpg or default.png, update those too
-if [ -e "%s/Backgrounds/default.jpg" ]; then
-    sudo cp -f "%s" "%s/Backgrounds/default.jpg"
-fi
-if [ -e "%s/Backgrounds/default.png" ]; then
-    sudo cp -f "%s" "%s/Backgrounds/default.png"
-fi
-
-# Send notification
-notify-send -i "%s" "SDDM" "Background SET"
-]],
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color13, sddm_theme_conf,
-        color12, sddm_theme_conf,
-        color12, sddm_theme_conf,
-        color12, sddm_theme_conf,
-        color1, sddm_theme_conf,
-        color10, sddm_theme_conf,
-        color7, sddm_theme_conf,
-        color7, sddm_theme_conf,
-        color7, sddm_theme_conf,
-        wallpaper_path, simple_theme,
-        simple_theme, wallpaper_path, simple_theme,
-        simple_theme, wallpaper_path, simple_theme,
-        PATHS.swaync_images .. "/ja.png"
-    )
-
-    -- Create temporary script and execute with kitty
-    local tmp_script = "/tmp/hyprland_sddm_setup.sh"
-    helpers.write_file(tmp_script, script_content)
-    hl.exec_cmd("chmod +x '" .. tmp_script .. "'")
-    hl.exec_cmd("kitty -e bash '" .. tmp_script .. "' &")
-end
-
-
----Get the current wallpaper path from swww cache
--- @return string|nil The current wallpaper path
-local function get_current_wallpaper_from_cache()
-    local monitor = get_focused_monitor()
-
-    if not monitor then
-        return nil
-    end
-
-    local result = helpers.exec(string.format(
-        "swww query | grep %s | awk '{print $9}'",
-        monitor
-    ))
-
-    if (result.success and result.stdout ~= "") then
-        return result.stdout:gsub("%s+$", "")
-    end
-
     return nil
 end
 
--- ============================================
--- PUBLIC FUNCTIONS
--- ============================================
+local function offer_sddm(is_effect)
+    local theme_dir = sddm_theme_dir()
+    if not theme_dir then return end
 
----Show a rofi menu for selecting a wallpaper
--- Displays wallpapers from ~/Pictures/wallpapers with thumbnails
--- Supports images (jpg, png, gif, webp) and videos (mp4, mkv, mov, webm)
--- Applies wallust colors after setting wallpaper
--- Offers to set as SDDM background (if simple_sddm_2 theme exists)
--- Modifies Startup_Apps.conf for video vs image wallpaper
--- @function select
-function wallpaper.select()
+    proc.kill("yad")
+    helpers.exec_async(
+        "yad --info --text='Set current wallpaper as SDDM background?' "
+        .. "--title='SDDM Background' --timeout=5 --timeout-indicator=right "
+        .. "--button='yes:0' --button='no:1' 2>/dev/null",
+        function(exit_code, _)
+            if exit_code ~= 0 then return end
+            if not proc.have("kitty") then
+                notify.error("Missing kitty", "Install kitty to set SDDM background"); return
+            end
+            local wp = is_effect and PATHS.wallpaper_modified or PATHS.wallpaper_current
+            local script = PATHS.scripts_dir .. "/sddm-wallpaper.sh"
+            local rofi_wallust = HOME .. "/.config/rofi/wallust/colors-rofi.rasi"
+            hl.exec_cmd(string.format("kitty -e bash %s %s %s %s &",
+                helpers.shquote(script),
+                helpers.shquote(wp),
+                helpers.shquote(theme_dir),
+                helpers.shquote(rofi_wallust)))
+        end
+    )
+end
 
-    if not command_exists("bc") then
-        notify.error("bc missing", "Install package bc first")
+local function swww_apply(image_path, monitor, on_done)
+    local cmd = string.format(
+        "swww img -o %s %s --transition-fps %d --transition-type %s --transition-duration %d --transition-bezier %s",
+        monitor, helpers.shquote(image_path),
+        SWWW.fps, SWWW.type, SWWW.duration, SWWW.bezier
+    )
+    helpers.exec_async(cmd, function(exit_code, _)
+        pcall(function()
+            if exit_code ~= 0 then notify.error("Failed to apply wallpaper"); return end
+            if on_done then on_done() end
+        end)
+    end)
+end
 
-        return
+local function apply_image(image_path, monitor, on_done)
+    local target = monitor or focused_monitor()
+    if not target then notify.error("Could not detect monitor"); return end
+    kill_wallpaper_daemons(true)
+
+    if proc.running("swww-daemon") then
+        swww_apply(image_path, target, on_done)
+    else
+        hl.exec_cmd("swww-daemon --format xrgb &")
+        helpers.delay(0.5, function() swww_apply(image_path, target, on_done) end)
     end
+end
+
+local function apply_video(video_path)
+    if not proc.have("mpvpaper") then
+        notify.error("mpvpaper not found", "Install mpvpaper for video wallpapers"); return
+    end
+    kill_wallpaper_daemons(false)
+    hl.exec_cmd(string.format("mpvpaper '*' -o 'load-scripts=no no-audio --loop' %s &",
+        helpers.shquote(video_path)))
+    notify.success("Video wallpaper applied")
+end
+
+local function get_rofi_icon_size()
+    local m = hl.get_active_monitor()
+    if not m then return "element-icon{size:20%;}" end
+    local sz = math.max(15, math.min(25, math.floor((m.height * 3) / (m.scale * 150))))
+    return string.format("element-icon{size:%d%%;}", sz)
+end
+
+local function current_wallpaper_from_swww()
+    local mon = focused_monitor()
+    if not mon then return nil end
+    local r = helpers.exec(string.format("swww query | grep %s | awk '{print $9}'",
+        helpers.shquote(mon)))
+    return r.success and helpers.trim(r.stdout) ~= "" and helpers.trim(r.stdout) or nil
+end
+
+-- ============================================
+-- PUBLIC
+-- ============================================
+
+---Extract colours from the current wallpaper and regenerate wallust templates.
+-- @param image_path string|nil  Explicit path; falls back to swww cache.
+function wallpaper.apply_wallust(image_path)
+    helpers.safe_call("Wallust application failed", function()
+        local path = image_path or current_wallpaper_from_swww()
+        if not path or path == "" or not helpers.file_exists(path) then return end
+
+        hl.exec_cmd(string.format("ln -sf %s %s", helpers.shquote(path), helpers.shquote(PATHS.rofi_current)))
+        helpers.mkdir_p(PATHS.wallpaper_current:match("(.+)/[^/]+"))
+        hl.exec_cmd(string.format("cp -f %s %s", helpers.shquote(path), helpers.shquote(PATHS.wallpaper_current)))
+        hl.exec_cmd("wallust run -s " .. helpers.shquote(path))
+    end)
+end
+
+---Show a rofi picker for selecting a wallpaper from ~/Pictures/wallpapers.
+function wallpaper.select()
+    if not proc.have("bc") then notify.error("bc missing", "Install bc first"); return end
 
     helpers.safe_call("Wallpaper select failed", function()
-        hl.exec_cmd("pkill rofi 2>/dev/null || true")
+        proc.kill("rofi")
+        local mon = focused_monitor()
+        if not mon then notify.error("Could not detect monitor"); return end
 
-        local focused_monitor = get_focused_monitor()
+        local all = get_wallpaper_list()
+        if #all == 0 then notify.error("No wallpapers found", PATHS.wallpapers); return end
 
-        if not focused_monitor then
-            notify.error("Could not detect focused monitor")
-
-            return
+        -- Build rofi icon-menu items.
+        local items = { { label = ". random", icon = all[math.random(1, #all)] } }
+        for _, p in ipairs(all) do
+            local name = p:match("([^/]+)$"):gsub("%..-$", "")
+            table.insert(items, { label = name, icon = thumbnail(p) })
         end
 
-        local menu_input = build_rofi_menu()
-
-        if (menu_input == "") then
-            notify.error("No wallpapers found", "Check " .. PATHS.wallpapers)
-
-            return
+        -- We need the original path by label for the callback.
+        local label_to_path = {}
+        for i, p in ipairs(all) do
+            label_to_path[items[i + 1].label] = p
         end
 
-        local rofi_override = get_rofi_icon_override()
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -i -show -dmenu -config '%s' -theme-str '%s'",
-            menu_input:gsub("'", "'\"'\"'"),
-            PATHS.rofi_theme,
-            rofi_override
+        local icon_override = get_rofi_icon_size()
+
+        -- Build and run rofi manually so we can pass -theme-str.
+        local tmpfile = "/tmp/hypr-wallpaper-menu-" .. os.time() .. ".txt"
+        local lines = {}
+        for _, item in ipairs(items) do
+            table.insert(lines, item.label .. "\0icon\x1f" .. item.icon)
+        end
+        helpers.write_file(tmpfile, table.concat(lines, "\n"))
+
+        local cmd = string.format(
+            "cat %s | rofi -i -show -dmenu -config %s -theme-str %s",
+            helpers.shquote(tmpfile),
+            helpers.shquote(PATHS.rofi_theme),
+            helpers.shquote(icon_override)
         )
 
-        helpers.exec_async(rofi_cmd, function(_, choice)
+        helpers.exec_async(cmd, function(_, raw)
+            os.remove(tmpfile)
             pcall(function()
-                if choice == nil or choice == "" then
-                    return
+                local choice = helpers.trim(raw or "")
+                if choice == "" then return end
+
+                if choice == ". random" then wallpaper.random(); return end
+
+                local selected = label_to_path[choice]
+                if not selected then
+                    -- Fallback: find by name prefix.
+                    local fr = helpers.exec(string.format("find %s -iname %s -print -quit",
+                        helpers.shquote(PATHS.wallpapers), helpers.shquote(choice .. "*")))
+                    selected = helpers.trim(fr.stdout)
                 end
+                if not selected or selected == "" then notify.error("Wallpaper not found", choice); return end
 
-                choice = choice:gsub("%s+$", "")
-
-                if (choice == "" or choice == ". random") then
-                    wallpaper.random()
-
-                    return
-                end
-
-                local find_result = helpers.exec(string.format(
-                    "find '%s' -iname '%s*' -print -quit",
-                    PATHS.wallpapers,
-                    choice
-                ))
-
-                if not find_result.success or find_result.stdout == "" then
-                    notify.error("Wallpaper not found", choice)
-
-                    return
-                end
-
-                local selected_file = find_result.stdout:gsub("%s+$", "")
-
-                if (is_video(selected_file)) then
-                    notify.info("Video wallpaper active this session only — update autostart.lua to persist across restarts")
-                    apply_video_wallpaper(selected_file)
+                if is_video(selected) then
+                    notify.info("Video wallpaper active this session only — update autostart.lua to persist")
+                    apply_video(selected)
                 else
-                    apply_image_wallpaper(selected_file, focused_monitor)
+                    apply_image(selected, mon, function()
+                        wallpaper.apply_wallust(selected)
+                        refresh.refresh_ui(function() offer_sddm(false) end)
+                    end)
                 end
             end)
         end)
     end)
 end
 
----Set a random wallpaper from the collection
--- Picks a random image from the wallpaper directory
--- Applies with swww transitions
--- Runs wallust and refreshes the UI
--- @function random
+---Apply a random image wallpaper from the collection.
 function wallpaper.random()
-
     helpers.safe_call("Random wallpaper failed", function()
-        local wallpapers = get_wallpaper_list()
+        local all = get_wallpaper_list()
+        local images = {}
+        for _, w in ipairs(all) do if not is_video(w) then table.insert(images, w) end end
+        if #images == 0 then notify.error("No image wallpapers found"); return end
 
-        local images_only = {}
+        local selected = images[math.random(1, #images)]
+        local mon      = focused_monitor()
+        if not mon then notify.error("Could not detect monitor"); return end
 
-        for _, w in ipairs(wallpapers) do
-            if not is_video(w) then
-                table.insert(images_only, w)
-            end
-        end
+        kill_wallpaper_daemons(true)
 
-        if (#images_only == 0) then
-            notify.error("No image wallpapers found")
-
-            return
-        end
-
-        local random_idx = math.random(1, #images_only)
-        local selected = images_only[random_idx]
-        local monitor = get_focused_monitor()
-
-        if not monitor then
-            notify.error("Could not detect focused monitor")
-
-            return
-        end
-
-        kill_non_swww_daemons()
-
-        local swww_cmd = string.format(
-            "swww img -o %s '%s' --transition-fps 30 --transition-type random --transition-duration 1 --transition-bezier .43,1.19,1,.4",
-            monitor,
-            selected
+        local cmd = string.format(
+            "swww img -o %s %s --transition-fps 30 --transition-type random --transition-duration 1 --transition-bezier .43,1.19,1,.4",
+            mon, helpers.shquote(selected)
         )
 
         local function apply_and_refresh()
             wallpaper.apply_wallust(selected)
-            refresh.refresh_ui(function()
-                notify.success("Random wallpaper applied")
-            end)
+            refresh.refresh_ui(function() notify.success("Random wallpaper applied") end)
         end
 
-        local daemon_check = helpers.exec("pgrep -x swww-daemon")
-
-        if daemon_check.success then
-            helpers.exec_async(swww_cmd, function(_, _)
-                pcall(apply_and_refresh)
-            end)
+        if proc.running("swww-daemon") then
+            helpers.exec_async(cmd, function(_, _) pcall(apply_and_refresh) end)
         else
             hl.exec_cmd("swww-daemon --format xrgb &")
             helpers.delay(0.5, function()
-                helpers.exec_async(swww_cmd, function(_, _)
-                    pcall(apply_and_refresh)
-                end)
+                helpers.exec_async(cmd, function(_, _) pcall(apply_and_refresh) end)
             end)
         end
     end)
 end
 
----Show a rofi menu for applying ImageMagick effects
--- Offers effects: No Effects, Black & White, Blurred, Charcoal,
--- Edge Detect, Emboss, Frame Raised, Frame Sunk, Negate, Oil Paint,
--- Posterize, Polaroid, Sepia Tone, Solarize, Sharpen, Vignette,
--- Vignette-black, Zoomed
--- Applies effect to current wallpaper and displays with swww
--- Runs wallust on modified image
--- @function effects
+---Show a rofi effect picker; applies ImageMagick effects to the current wallpaper.
 function wallpaper.effects()
-
-    if not command_exists("magick") and not command_exists("convert") then
-        notify.error("ImageMagick not found", "Install imagemagick for wallpaper effects")
-
-        return
+    if not proc.have("magick") and not proc.have("convert") then
+        notify.error("ImageMagick not found", "Install imagemagick for effects"); return
     end
 
-    local effects = {
-        ["No Effects"] = "none",
-        ["Black & White"] = "colorspace gray -sigmoidal-contrast 10,40%",
-        ["Blurred"] = "-blur 0x10",
-        ["Charcoal"] = "-charcoal 0x5",
-        ["Edge Detect"] = "-edge 1",
-        ["Emboss"] = "-emboss 0x5",
+    local EFFECTS = {
+        ["No Effects"]   = "none",
+        ["Black & White"]= "colorspace gray -sigmoidal-contrast 10,40%",
+        ["Blurred"]      = "-blur 0x10",
+        ["Charcoal"]     = "-charcoal 0x5",
+        ["Edge Detect"]  = "-edge 1",
+        ["Emboss"]       = "-emboss 0x5",
         ["Frame Raised"] = "+raise 150",
-        ["Frame Sunk"] = "-raise 150",
-        ["Negate"] = "-negate",
-        ["Oil Paint"] = "-paint 4",
-        ["Posterize"] = "-posterize 4",
-        ["Polaroid"] = "-polaroid 0",
-        ["Sepia Tone"] = "-sepia-tone 65%",
-        ["Solarize"] = "-solarize 80%",
-        ["Sharpen"] = "-sharpen 0x5",
-        ["Vignette"] = "-vignette 0x3",
-        ["Vignette-black"] = "-background black -vignette 0x3",
-        ["Zoomed"] = "-gravity Center -extent 1:1"
+        ["Frame Sunk"]   = "-raise 150",
+        ["Negate"]       = "-negate",
+        ["Oil Paint"]    = "-paint 4",
+        ["Posterize"]    = "-posterize 4",
+        ["Polaroid"]     = "-polaroid 0",
+        ["Sepia Tone"]   = "-sepia-tone 65%",
+        ["Solarize"]     = "-solarize 80%",
+        ["Sharpen"]      = "-sharpen 0x5",
+        ["Vignette"]     = "-vignette 0x3",
+        ["Vignette-black"]= "-background black -vignette 0x3",
+        ["Zoomed"]       = "-gravity Center -extent 1:1",
     }
 
     helpers.safe_call("Wallpaper effects failed", function()
-        hl.exec_cmd("pkill rofi 2>/dev/null || true")
+        proc.kill("rofi")
 
-        local effect_names = {}
+        local names = {}
+        for n, _ in pairs(EFFECTS) do table.insert(names, n) end
+        table.sort(names)
 
-        for name, _ in pairs(effects) do
-            table.insert(effect_names, name)
-        end
+        local menu_mod = require("utils.menu")
+        menu_mod.pick({
+            theme = PATHS.rofi_effect_theme,
+            items = names,
+        }, function(choice, _)
+            if not choice then return end
+            local mon = focused_monitor()
 
-        table.sort(effect_names)
-
-        local menu_input = table.concat(effect_names, "\n")
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -dmenu -i -config '%s'",
-            menu_input,
-            PATHS.rofi_effect_theme
-        )
-
-        helpers.exec_async(rofi_cmd, function(_, choice)
-            pcall(function()
-                if choice == nil or choice == "" then
-                    return
+            if choice == "No Effects" then
+                hl.exec_cmd(string.format("cp -f %s %s",
+                    helpers.shquote(PATHS.wallpaper_current), helpers.shquote(PATHS.wallpaper_modified)))
+                if mon then
+                    hl.exec_cmd(string.format(
+                        "swww img -o %s %s --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
+                        mon, helpers.shquote(PATHS.wallpaper_current)))
                 end
-
-                choice = choice:gsub("%s+$", "")
-
-        if (choice == "No Effects") then
-            hl.exec_cmd(string.format("cp -f '%s' '%s'", PATHS.wallpaper_current, PATHS.wallpaper_modified))
-
-            local monitor = get_focused_monitor()
-
-            if (monitor) then
-                local swww_cmd = string.format(
-                    "swww img -o %s '%s' --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
-                    monitor,
-                    PATHS.wallpaper_current
-                )
-
-                hl.exec_cmd(swww_cmd)
+                wallpaper.apply_wallust(PATHS.wallpaper_current)
+                helpers.delay(2, function() refresh.refresh_ui(); notify.info("No effects applied") end)
+                return
             end
 
-            wallpaper.apply_wallust(PATHS.wallpaper_current)
+            local params = EFFECTS[choice]
+            if not params then return end
 
-            helpers.delay(2, function()
-                refresh.refresh_ui()
-                notify.info("No effects applied")
-            end)
+            notify.info("Applying: " .. choice)
 
-            return
-        end
+            local magick_cmd = string.format(
+                "magick %s %s %s 2>/dev/null || convert %s %s %s 2>/dev/null",
+                helpers.shquote(PATHS.wallpaper_current), params, helpers.shquote(PATHS.wallpaper_modified),
+                helpers.shquote(PATHS.wallpaper_current), params, helpers.shquote(PATHS.wallpaper_modified)
+            )
+            hl.exec_cmd(magick_cmd)
+            proc.signal("swaybg",   "SIGUSR1")
+            proc.signal("mpvpaper", "SIGUSR1")
 
-        local effect_params = effects[choice]
-
-        if not effect_params then
-            return
-        end
-
-        notify.info("Applying: " .. choice .. " effects")
-
-        local magick_cmd = string.format(
-            "magick '%s' %s '%s' 2>/dev/null || convert '%s' %s '%s' 2>/dev/null",
-            PATHS.wallpaper_current,
-            effect_params,
-            PATHS.wallpaper_modified,
-            PATHS.wallpaper_current,
-            effect_params,
-            PATHS.wallpaper_modified
-        )
-
-        hl.exec_cmd(magick_cmd)
-        hl.exec_cmd("killall -SIGUSR1 swaybg 2>/dev/null || true")
-        hl.exec_cmd("killall -SIGUSR1 mpvpaper 2>/dev/null || true")
-
-        helpers.delay(1, function()
-            local monitor = get_focused_monitor()
-
-            if (monitor) then
-                local swww_cmd = string.format(
-                    "swww img -o %s '%s' --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
-                    monitor,
-                    PATHS.wallpaper_modified
-                )
-
-                hl.exec_cmd(swww_cmd)
-            end
-
-            helpers.delay(2, function()
-                hl.exec_cmd("wallust run '" .. PATHS.wallpaper_modified .. "' -s")
-
-                helpers.delay(1, function()
-                    refresh.refresh_ui()
-                    notify.success(choice .. " effects applied")
-                    offer_sddm_wallpaper(true)
+            helpers.delay(1, function()
+                if mon then
+                    hl.exec_cmd(string.format(
+                        "swww img -o %s %s --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
+                        mon, helpers.shquote(PATHS.wallpaper_modified)))
+                end
+                helpers.delay(2, function()
+                    hl.exec_cmd("wallust run " .. helpers.shquote(PATHS.wallpaper_modified) .. " -s")
+                    helpers.delay(1, function()
+                        refresh.refresh_ui()
+                        notify.success(choice .. " effects applied")
+                        offer_sddm(true)
+                    end)
                 end)
-            end)
-        end)
             end)
         end)
     end)
 end
 
----Start auto-rotation daemon for wallpapers
--- Loops through wallpapers at INTERVAL (default 1800 seconds)
--- Applies each wallpaper with swww transitions
--- Runs wallust for each change
--- This function starts a background process
--- @function auto_change
+---Start the auto-rotation daemon (changes wallpaper every AUTO_CHANGE_INTERVAL seconds).
 function wallpaper.auto_change()
-
     helpers.safe_call("Auto-change failed", function()
-        local wallpapers = get_wallpaper_list()
-
-        local images_only = {}
-
-        for _, w in ipairs(wallpapers) do
-            if not is_video(w) then
-                table.insert(images_only, w)
-            end
-        end
-
-        if (#images_only == 0) then
-            notify.error("No image wallpapers found for auto-change")
-
-            return
-        end
+        local all = get_wallpaper_list()
+        local images = {}
+        for _, w in ipairs(all) do if not is_video(w) then table.insert(images, w) end end
+        if #images == 0 then notify.error("No image wallpapers for auto-change"); return end
 
         notify.info("Starting wallpaper auto-change daemon")
 
-        local script_content = string.format([[
+        local ext_glob = "-name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.gif' -o -name '*.webp'"
+        local script = string.format([[
 #!/bin/bash
 export SWWW_TRANSITION_FPS=60
 export SWWW_TRANSITION_TYPE=simple
-
 INTERVAL=%d
 USERSCRIPTS="%s"
-ROFI_LINK="$HOME/.config/rofi/.current_wallpaper"
-WALLPAPER_CURRENT="$HOME/.config/hypr/wallpaper_effects/.wallpaper_current"
+ROFI_LINK="%s"
+WALLPAPER_CURRENT="%s"
 
 apply_wallust() {
     local img="$1"
@@ -865,21 +427,12 @@ apply_wallust() {
     wallust run -s "$img" || true
 }
 
-# Function to refresh UI without restarting waybar
 refresh_no_waybar() {
     pkill rofi 2>/dev/null || true
-
-    ags -q 2>/dev/null || true
-    sleep 0.1
-    ags &
-
-    sleep 0.2
-    swaync-client --reload-config
-
+    ags -q 2>/dev/null || true; sleep 0.1; ags &
+    sleep 0.2; swaync-client --reload-config
     sleep 1
-    if [ -f "${USERSCRIPTS}/RainbowBorders.sh" ]; then
-        "${USERSCRIPTS}/RainbowBorders.sh" &
-    fi
+    [ -f "${USERSCRIPTS}/RainbowBorders.sh" ] && "${USERSCRIPTS}/RainbowBorders.sh" &
 }
 
 while true; do
@@ -895,65 +448,18 @@ while true; do
 done
 ]],
             AUTO_CHANGE_INTERVAL,
-            HOME .. "/.config/hypr/scripts",
+            PATHS.scripts_dir,
+            PATHS.rofi_current,
+            PATHS.wallpaper_current,
             PATHS.wallpapers,
-            "-name '*.jpg' -o -name '*.jpeg' -o -name '*.png' -o -name '*.gif' -o -name '*.webp'"
+            ext_glob
         )
 
-        local tmp_script = "/tmp/hyprland_wallpaper_daemon.sh"
-        helpers.write_file(tmp_script, script_content)
-        hl.exec_cmd("chmod +x '" .. tmp_script .. "'")
-
-        hl.exec_cmd("pkill -f 'hyprland_wallpaper_daemon' 2>/dev/null || true")
-
-        hl.exec_cmd("bash '" .. tmp_script .. "' &")
-
+        local tmp = "/tmp/hyprland_wallpaper_daemon.sh"
+        helpers.write_file(tmp, script)
+        proc.kill_pat("hyprland_wallpaper_daemon")
+        hl.exec_cmd("bash " .. helpers.shquote(tmp) .. " &")
         notify.success("Auto-change daemon started (" .. AUTO_CHANGE_INTERVAL .. "s interval)")
-    end)
-end
-
----Extract colors from wallpaper and refresh
--- Determines current wallpaper from swww cache
--- Creates symlinks for rofi and current wallpaper
--- Runs wallust run -s to regenerate color templates
--- @param image_path string|nil Optional explicit image path
--- @function apply_wallust
-function wallpaper.apply_wallust(image_path)
-
-    helpers.safe_call("Wallust application failed", function()
-        local wallpaper_path = image_path
-
-        if not wallpaper_path then
-            wallpaper_path = get_current_wallpaper_from_cache()
-        end
-
-        if not wallpaper_path or wallpaper_path == "" then
-            local monitor = get_focused_monitor()
-
-            if (monitor) then
-                local cache_file = PATHS.swww_cache .. "/" .. monitor
-
-                if helpers.file_exists(cache_file) then
-                    local result = helpers.exec("swww query | grep " .. monitor .. " | awk '{print $9}'")
-
-                    if (result.success) then
-                        wallpaper_path = result.stdout:gsub("%s+$", "")
-                    end
-                end
-            end
-        end
-
-        if not wallpaper_path or wallpaper_path == "" or not helpers.file_exists(wallpaper_path) then
-            return
-        end
-
-        hl.exec_cmd(string.format("ln -sf '%s' '%s'", wallpaper_path, PATHS.rofi_current))
-
-        helpers.mkdir_p(PATHS.wallpaper_current:match("(.+)/[^/]+"))
-
-        hl.exec_cmd(string.format("cp -f '%s' '%s'", wallpaper_path, PATHS.wallpaper_current))
-
-        hl.exec_cmd("wallust run -s '" .. wallpaper_path .. "'")
     end)
 end
 
