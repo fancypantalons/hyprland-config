@@ -66,7 +66,7 @@ end
 -- Creates the directory if it doesn't exist
 local function ensure_screenshot_dir()
     local dir = get_screenshot_dir()
-    hl.exec_cmd("mkdir -p " .. dir)
+    helpers.mkdir_p(dir)
 
     return dir
 end
@@ -375,7 +375,7 @@ local function screenshot_area()
             end
 
             hl.exec_cmd("wl-copy < " .. tmpfile)
-            hl.exec_cmd(string.format("mv %s %s", tmpfile, filepath))
+            os.rename(tmpfile, filepath)
 
             play_screenshot_sound()
             notify_screenshot(filepath, "Screenshot Saved")
@@ -411,7 +411,7 @@ local function screenshot_swappy()
                 if response == "action1" then
                     hl.exec_cmd("swappy -f - < " .. tmpfile)
                 elseif response == "action2" then
-                    hl.exec_cmd("rm " .. tmpfile)
+                    os.remove(tmpfile)
                 end
             end)
         end

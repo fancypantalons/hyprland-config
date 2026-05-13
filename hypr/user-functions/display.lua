@@ -73,11 +73,10 @@ local function get_brightness_icon(brightness)
 end
 
 ---Ensure the hyprsunset state file exists
--- Creates the state file with "off" if it doesn't exist. mkdir -p stays as a
--- shell call because Lua has no portable mkdir; it's harmless if it races.
+-- Creates the state file with "off" if it doesn't exist.
 local function ensure_state_file()
     if not helpers.path_exists(STATE_FILE) then
-        hl.exec_cmd(string.format("mkdir -p %s", CACHE_DIR))
+        helpers.mkdir_p(CACHE_DIR)
         helpers.write_file(STATE_FILE, "off")
     end
 end

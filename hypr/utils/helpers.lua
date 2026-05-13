@@ -156,6 +156,41 @@ function helpers.path_exists(path)
     return false
 end
 
+---Check whether a file exists (not a directory).
+-- Uses io.open in read mode; directories typically fail to open this way.
+-- @param path string
+-- @return boolean
+function helpers.file_exists(path)
+    local f = io.open(path, "r")
+    if not f then
+        return false
+    end
+    f:close()
+    return true
+end
+
+---Check whether a directory exists.
+-- Tries to open path with trailing slash appended; directories can be "opened" as streams.
+-- @param path string
+-- @return boolean
+function helpers.dir_exists(path)
+    local f = io.open(path .. "/", "r")
+    if f then
+        f:close()
+        return true
+    end
+    return false
+end
+
+---Create a directory and its parents (mkdir -p equivalent).
+-- Uses os.execute with mkdir -p as Lua has no native recursive directory creation.
+-- @param path string The directory path to create
+-- @return boolean success
+function helpers.mkdir_p(path)
+    local result = os.execute("mkdir -p " .. path .. " 2>/dev/null")
+    return result == 0 or result == true
+end
+
 ---Decode an XKB modifier bitmask into an ordered list of modifier name strings.
 -- Recognises Super(64), Ctrl(4), Shift(1), and Alt/Mod1(8).
 -- Other bits (Lock, NumLock, Mod3, Mod5) are ignored.

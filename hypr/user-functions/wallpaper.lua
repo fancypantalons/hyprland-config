@@ -160,7 +160,7 @@ local function generate_gif_thumbnail(gif_path)
     local basename = gif_path:match("([^/]+)$")
     local cache_path = PATHS.gif_cache .. "/" .. basename .. ".png"
 
-    hl.exec_cmd("mkdir -p '" .. PATHS.gif_cache .. "'")
+    helpers.mkdir_p(PATHS.gif_cache)
 
     if not helpers.path_exists(cache_path) then
         helpers.exec(string.format(
@@ -180,7 +180,7 @@ local function generate_video_thumbnail(video_path)
     local basename = video_path:match("([^/]+)$")
     local cache_path = PATHS.video_cache .. "/" .. basename .. ".png"
 
-    hl.exec_cmd("mkdir -p '" .. PATHS.video_cache .. "'")
+    helpers.mkdir_p(PATHS.video_cache)
 
     if not helpers.path_exists(cache_path) then
         helpers.exec(string.format(
@@ -338,9 +338,7 @@ offer_sddm_wallpaper = function(is_effect)
     local sddm_dir = nil
 
     for _, dir in ipairs(PATHS.sddm_themes) do
-        local check = helpers.exec("test -d '" .. dir .. "'")
-
-        if (check.success) then
+        if helpers.dir_exists(dir) then
             sddm_dir = dir
 
             break
@@ -353,9 +351,8 @@ offer_sddm_wallpaper = function(is_effect)
 
     local simple_theme = sddm_dir .. "/simple_sddm_2"
     local backgrounds_dir = simple_theme .. "/Backgrounds"
-    local check = helpers.exec("test -d '" .. simple_theme .. "' -a -w '" .. backgrounds_dir .. "'")
 
-    if not check.success then
+    if not (helpers.dir_exists(simple_theme) and helpers.path_exists(backgrounds_dir)) then
         return
     end
 
@@ -397,9 +394,7 @@ set_sddm_wallpaper = function(mode)
     local sddm_dir = nil
 
     for _, dir in ipairs(PATHS.sddm_themes) do
-        local check = helpers.exec("test -d '" .. dir .. "'")
-
-        if (check.success) then
+        if helpers.dir_exists(dir) then
             sddm_dir = dir
 
             break
@@ -417,9 +412,7 @@ set_sddm_wallpaper = function(mode)
     local wallpaper_modified = PATHS.wallpaper_modified
 
     -- Check if simple_sddm_2 theme exists
-    local check = helpers.exec("test -d '" .. simple_theme .. "'")
-
-    if not check.success then
+    if not helpers.dir_exists(simple_theme) then
         return
     end
 
@@ -965,9 +958,8 @@ function wallpaper.apply_wallust(image_path)
 
             if (monitor) then
                 local cache_file = PATHS.swww_cache .. "/" .. monitor
-                local cache_check = helpers.exec("test -f '" .. cache_file .. "'")
 
-                if (cache_check.success) then
+                if helpers.file_exists(cache_file) then
                     local result = helpers.exec("swww query | grep " .. monitor .. " | awk '{print $9}'")
 
                     if (result.success) then
@@ -977,13 +969,13 @@ function wallpaper.apply_wallust(image_path)
             end
         end
 
-        if not wallpaper_path or wallpaper_path == "" or not helpers.exec("test -f '" .. wallpaper_path .. "'").success then
+        if not wallpaper_path or wallpaper_path == "" or not helpers.file_exists(wallpaper_path) then
             return
         end
 
         hl.exec_cmd(string.format("ln -sf '%s' '%s'", wallpaper_path, PATHS.rofi_current))
 
-        hl.exec_cmd("mkdir -p '" .. PATHS.wallpaper_current:match("(.+)/[^/]+$") .. "'")
+        helpers.mkdir_p(PATHS.wallpaper_current:match("(.+)/[^/]+"))
 
         hl.exec_cmd(string.format("cp -f '%s' '%s'", wallpaper_path, PATHS.wallpaper_current))
 

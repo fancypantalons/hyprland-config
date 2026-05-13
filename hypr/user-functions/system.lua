@@ -297,9 +297,7 @@ end
 function system.start_polkit()
     local success, err = pcall(function()
         for _, agent_path in ipairs(POLKIT_AGENTS) do
-            local check_result = helpers.exec("test -e " .. agent_path .. " && test ! -d " .. agent_path)
-
-            if check_result.success then
+            if helpers.file_exists(agent_path) then
                 -- Execute the polkit agent
                 hl.exec_cmd(agent_path)
 

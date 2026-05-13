@@ -2253,7 +2253,7 @@ function rofi.emoji()
     )
 
     helpers.exec_async(rofi_cmd, function(_, _)
-        hl.exec_cmd("rm -f " .. tmpfile)
+        os.remove(tmpfile)
 
         notify.send({
             text = "Emoji copied to clipboard",
@@ -2463,9 +2463,7 @@ function rofi.animations()
         local notify = require("utils.notify")
 
         -- Check animations directory exists
-        local anim_dir_exists = helpers.exec(string.format("test -d '%s'", ANIMATIONS_DIR)).success
-
-        if (not anim_dir_exists) then
+        if (not helpers.dir_exists(ANIMATIONS_DIR)) then
             notify.error("Animations directory not found: " .. ANIMATIONS_DIR)
 
             return
