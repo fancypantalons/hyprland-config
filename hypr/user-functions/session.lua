@@ -424,7 +424,7 @@ end
 -- @function screenshot
 -- @param mode string The screenshot mode
 function session.screenshot(mode)
-    local success, err = pcall(function()
+    helpers.safe_call("Screenshot failed", function()
         if mode == SCREENSHOT_MODES.NOW then
             screenshot_now()
         elseif mode == SCREENSHOT_MODES.AREA then
@@ -442,11 +442,6 @@ function session.screenshot(mode)
             notify.error("Unknown screenshot mode: " .. tostring(mode))
         end
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("Screenshot failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -467,7 +462,7 @@ end
 -- calling hyprctl from inside a keybind handler (which would deadlock).
 -- @function show_hints
 function session.show_hints()
-    local success, err = pcall(function()
+    helpers.safe_call("Key hints failed", function()
         -- Toggle: kill yad if it's already open, otherwise launch it
         local check = helpers.exec("pgrep -x yad")
 
@@ -517,10 +512,6 @@ function session.show_hints()
             hl.exec_cmd(yad_cmd)
         end)
     end)
-
-    if (not success) then
-        notify.error("Key hints failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -533,7 +524,7 @@ end
 -- or "dispatcher: arg" as a fallback.  Binds with neither are omitted.
 -- @function show_binds
 function session.show_binds()
-    local success, err = pcall(function()
+    helpers.safe_call("Key binds failed", function()
         hl.exec_cmd("pkill -x yad 2>/dev/null || true")
         hl.exec_cmd("pkill -x rofi 2>/dev/null || true")
 
@@ -580,11 +571,6 @@ function session.show_binds()
             hl.exec_cmd(rofi_cmd)
         end)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Key binds failed", tostring(err))
-    end
 end
 
 return session

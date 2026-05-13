@@ -143,7 +143,7 @@ end
 -- Automatically shows a notification with the new volume level and plays a sound
 -- @function volume_up
 function audio.volume_up()
-    local success, err = pcall(function()
+    helpers.safe_call("Volume up failed", function()
         local muted = is_muted()
 
         if muted == nil then
@@ -180,11 +180,6 @@ function audio.volume_up()
             play_volume_sound()
         end
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Volume up failed", tostring(err))
-    end
 end
 
 ---Decrease the master volume by 5%
@@ -192,7 +187,7 @@ end
 -- Automatically shows a notification with the new volume level and plays a sound
 -- @function volume_down
 function audio.volume_down()
-    local success, err = pcall(function()
+    helpers.safe_call("Volume down failed", function()
         local muted = is_muted()
 
         if muted == nil then
@@ -229,18 +224,13 @@ function audio.volume_down()
             play_volume_sound()
         end
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Volume down failed", tostring(err))
-    end
 end
 
 ---Toggle the master volume mute state
 -- Shows a notification indicating the new mute state
 -- @function volume_toggle
 function audio.volume_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Volume toggle failed", function()
         local muted = is_muted()
 
         if muted == nil then
@@ -270,18 +260,13 @@ function audio.volume_toggle()
 
         notify_volume(volume, new_muted)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Volume toggle failed", tostring(err))
-    end
 end
 
 ---Toggle the microphone mute state
 -- Shows a notification indicating the new microphone state
 -- @function mic_toggle
 function audio.mic_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Mic toggle failed", function()
         local muted = is_mic_muted()
 
         if muted == nil then
@@ -308,11 +293,6 @@ function audio.mic_toggle()
 
         notify_mic(not muted)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Mic toggle failed", tostring(err))
-    end
 end
 
 -- ============================================

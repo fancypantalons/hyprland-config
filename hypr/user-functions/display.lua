@@ -186,7 +186,7 @@ end
 -- Shows a notification with the new brightness level and appropriate icon
 -- @function brightness_up
 function display.brightness_up()
-    local success, err = pcall(function()
+    helpers.safe_call("Brightness up failed", function()
         local current = get_brightness()
 
         if current == nil then
@@ -213,11 +213,6 @@ function display.brightness_up()
 
         notify_brightness(new_brightness)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Brightness up failed", tostring(err))
-    end
 end
 
 ---Decrease screen brightness by 5%
@@ -225,7 +220,7 @@ end
 -- Shows a notification with the new brightness level and appropriate icon
 -- @function brightness_down
 function display.brightness_down()
-    local success, err = pcall(function()
+    helpers.safe_call("Brightness down failed", function()
         local current = get_brightness()
 
         if current == nil then
@@ -252,11 +247,6 @@ function display.brightness_down()
 
         notify_brightness(new_brightness)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Brightness down failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -267,7 +257,7 @@ end
 -- Shows a notification with the new brightness level and appropriate icon
 -- @function kbd_brightness_up
 function display.kbd_brightness_up()
-    local success, err = pcall(function()
+    helpers.safe_call("Keyboard brightness up failed", function()
         local current = get_kbd_brightness()
 
         if current == nil then
@@ -290,18 +280,13 @@ function display.kbd_brightness_up()
 
         notify_kbd_brightness(new_brightness)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Keyboard brightness up failed", tostring(err))
-    end
 end
 
 ---Decrease keyboard brightness by 30%
 -- Shows a notification with the new brightness level and appropriate icon
 -- @function kbd_brightness_down
 function display.kbd_brightness_down()
-    local success, err = pcall(function()
+    helpers.safe_call("Keyboard brightness down failed", function()
         local current = get_kbd_brightness()
 
         if current == nil then
@@ -324,11 +309,6 @@ function display.kbd_brightness_down()
 
         notify_kbd_brightness(new_brightness)
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Keyboard brightness down failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -341,7 +321,7 @@ end
 -- Shows a notification indicating the new state
 -- @function nightlight_toggle
 function display.nightlight_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Night light toggle failed", function()
         local current_state = read_state()
         local running = is_hyprsunset_running()
 
@@ -359,11 +339,6 @@ function display.nightlight_toggle()
             notify_nightlight(true, NIGHTLIGHT_TEMP)
         end
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Night light toggle failed", tostring(err))
-    end
 end
 
 ---Get the night light status as JSON for Waybar integration
@@ -371,43 +346,41 @@ end
 -- @return string JSON formatted status
 -- @function nightlight_status
 function display.nightlight_status()
-    local success, result = pcall(function()
-        ensure_state_file()
+    return helpers.safe_call_with_return(
+        "Night light status check failed",
+        function()
+            ensure_state_file()
 
-        local running = is_hyprsunset_running()
-        local state = read_state()
+            local running = is_hyprsunset_running()
+            local state = read_state()
 
-        if running then
-            state = "on"
-        end
+            if running then
+                state = "on"
+            end
 
-        local text, class, tooltip
+            local text, class, tooltip
 
-        if state == "on" then
-            text = "🌇"
-            class = "on"
-            tooltip = string.format("Night light on @ %dK", NIGHTLIGHT_TEMP)
-        else
-            text = "☀"
-            class = "off"
-            tooltip = "Night light off"
-        end
+            if state == "on" then
+                text = "🌇"
+                class = "on"
+                tooltip = string.format("Night light on @ %dK", NIGHTLIGHT_TEMP)
+            else
+                text = "☀"
+                class = "off"
+                tooltip = "Night light off"
+            end
 
-        local json = string.format(
-            '{"text":"%s","class":"%s","tooltip":"%s"}',
-            text,
-            class,
-            tooltip
-        )
+            local json = string.format(
+                '{"text":"%s","class":"%s","tooltip":"%s"}',
+                text,
+                class,
+                tooltip
+            )
 
-        return json
-    end)
-
-    if not success then
-        return '{"text":"☀","class":"off","tooltip":"Night light off"}'
-    end
-
-    return result
+            return json
+        end,
+        '{"text":"☀","class":"off","tooltip":"Night light off"}'
+    )
 end
 
 -- ============================================
@@ -420,7 +393,7 @@ end
 -- Shows a notification with the new blur state
 -- @function blur_toggle
 function display.blur_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Blur toggle failed", function()
         local current_passes = get_blur_passes()
 
         if current_passes == nil then
@@ -460,11 +433,6 @@ function display.blur_toggle()
             notify_blur(true)
         end
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Blur toggle failed", tostring(err))
-    end
 end
 
 return display

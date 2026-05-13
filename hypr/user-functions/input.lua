@@ -137,7 +137,7 @@ end
 -- Saves new layout to cache file and shows notification
 -- @function switch_layout
 function input.switch_layout()
-    local success, err = pcall(function()
+    helpers.safe_call("Layout switch failed", function()
         local current_layout, layouts, read_err = read_current_layout()
 
         if not current_layout then
@@ -188,10 +188,6 @@ function input.switch_layout()
             end)
         end)
     end)
-
-    if not success then
-        notify.error("Layout switch failed", tostring(err))
-    end
 end
 
 return input

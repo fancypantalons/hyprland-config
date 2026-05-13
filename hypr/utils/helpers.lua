@@ -191,6 +191,38 @@ function helpers.mkdir_p(path)
     return result == 0 or result == true
 end
 
+---Execute a function with automatic error handling.
+-- Wraps fn in pcall and shows notification on failure.
+-- For functions that don't return values.
+--
+-- @param error_context string The error message prefix (e.g., "Kill active process failed")
+-- @param fn function The function to execute
+function helpers.safe_call(error_context, fn)
+    local success, err = pcall(fn)
+    if not success then
+        local notify = require("utils.notify")
+        notify.error(error_context, tostring(err))
+    end
+end
+
+---Execute a function with automatic error handling, returning a value.
+-- Wraps fn in pcall and returns result on success, default_value on failure.
+-- For functions that return values (like status functions).
+--
+-- @param error_context string The error message prefix
+-- @param fn function The function to execute (must return a value)
+-- @param default_value any The value to return on error
+-- @return any The result of fn() on success, default_value on failure
+function helpers.safe_call_with_return(error_context, fn, default_value)
+    local success, result = pcall(fn)
+    if not success then
+        local notify = require("utils.notify")
+        notify.error(error_context, tostring(result))
+        return default_value
+    end
+    return result
+end
+
 ---Decode an XKB modifier bitmask into an ordered list of modifier name strings.
 -- Recognises Super(64), Ctrl(4), Shift(1), and Alt/Mod1(8).
 -- Other bits (Lock, NumLock, Mod3, Mod5) are ignored.

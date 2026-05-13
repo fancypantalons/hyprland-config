@@ -39,7 +39,7 @@ local game_mode_saved = nil
 -- Reads the PID from hl.get_active_window() and sends SIGTERM via `kill`.
 -- @function kill_active
 function window.kill_active()
-    local success, err = pcall(function()
+    helpers.safe_call("Kill active process failed", function()
         local active = hl.get_active_window()
 
         if not active or not active.pid or active.pid == 0 then
@@ -53,10 +53,6 @@ function window.kill_active()
             notify.error("Failed to kill process", kill_result.stderr)
         end
     end)
-
-    if not success then
-        notify.error("Kill active process failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -176,18 +172,13 @@ end
 -- When disabling: restarts swww and reloads config
 -- @function game_mode
 function window.game_mode()
-    local success, err = pcall(function()
+    helpers.safe_call("Game mode toggle failed", function()
         if is_animations_enabled() then
             enable_game_mode()
         else
             disable_game_mode()
         end
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("Game mode toggle failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -259,7 +250,7 @@ end
 -- Automatically switches layout and rebinds navigation keys appropriately
 -- @function layout_toggle
 function window.layout_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Layout toggle failed", function()
         local current_layout = get_current_layout()
 
         if current_layout == "master" then
@@ -268,11 +259,6 @@ function window.layout_toggle()
             switch_to_master()
         end
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("Layout toggle failed", tostring(err))
-    end
 end
 
 return window

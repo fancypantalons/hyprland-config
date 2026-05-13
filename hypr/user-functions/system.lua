@@ -80,7 +80,7 @@ end
 -- Shows a notification with the new state
 -- @function airplane_mode
 function system.airplane_mode()
-    local success, err = pcall(function()
+    helpers.safe_call("Airplane mode toggle failed", function()
         local result = helpers.exec("rfkill list wifi | grep 'Soft blocked: yes'")
         local is_blocked = result.success and result.stdout ~= ""
         local toggle_result
@@ -107,10 +107,6 @@ function system.airplane_mode()
             end
         end
     end)
-
-    if not success then
-        notify_error("Airplane mode toggle failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -150,7 +146,7 @@ end
 -- Shows a notification with the new state
 -- @function touchpad_toggle
 function system.touchpad_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Touchpad toggle failed", function()
         local current = helpers.read_file(STATUS_FILE)
 
         if not current then
@@ -166,10 +162,6 @@ function system.touchpad_toggle()
             touchpad_enable()
         end
     end)
-
-    if not success then
-        notify_error("Touchpad toggle failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -241,7 +233,7 @@ end
 -- Checks if hypridle is running and toggles its state
 -- @function idle_inhibit_toggle
 function system.idle_inhibit_toggle()
-    local success, err = pcall(function()
+    helpers.safe_call("Idle inhibitor toggle failed", function()
         local check_result = helpers.exec("pgrep -x hypridle")
         local is_running = check_result.success
 
@@ -258,10 +250,6 @@ function system.idle_inhibit_toggle()
             notify_system("Screen auto-lock", "Enabled — screen will lock when idle")
         end
     end)
-
-    if not success then
-        notify_error("Idle inhibitor toggle failed", tostring(err))
-    end
 end
 
 ---Get the idle inhibitor status for Waybar
@@ -269,22 +257,20 @@ end
 -- @return string JSON with text, class, and tooltip
 -- @function idle_inhibit_status
 function system.idle_inhibit_status()
-    local success, result = pcall(function()
-        local check_result = helpers.exec("pgrep -x hypridle")
-        local is_running = check_result.success
+    return helpers.safe_call_with_return(
+        "Idle inhibitor status check failed",
+        function()
+            local check_result = helpers.exec("pgrep -x hypridle")
+            local is_running = check_result.success
 
-        if is_running then
-            return '{"text": "RUNNING", "class": "active", "tooltip": "Screen auto-lock: ON\nLeft Click: Disable auto-lock\nRight Click: Lock now"}'
-        else
-            return '{"text": "NOT RUNNING", "class": "notactive", "tooltip": "Screen auto-lock: OFF\nLeft Click: Enable auto-lock\nRight Click: Lock now"}'
-        end
-    end)
-
-    if success then
-        return result
-    else
-        return '{"text": "ERROR", "class": "error", "tooltip": "Failed to check status"}'
-    end
+            if is_running then
+                return '{"text": "RUNNING", "class": "active", "tooltip": "Screen auto-lock: ON\nLeft Click: Disable auto-lock\nRight Click: Lock now"}'
+            else
+                return '{"text": "NOT RUNNING", "class": "notactive", "tooltip": "Screen auto-lock: OFF\nLeft Click: Enable auto-lock\nRight Click: Lock now"}'
+            end
+        end,
+        '{"text": "ERROR", "class": "error", "tooltip": "Failed to check status"}'
+    )
 end
 
 -- ============================================
@@ -295,7 +281,7 @@ end
 -- Checks a list of common polkit agent paths and executes the first one found
 -- @function start_polkit
 function system.start_polkit()
-    local success, err = pcall(function()
+    helpers.safe_call("Polkit startup failed", function()
         for _, agent_path in ipairs(POLKIT_AGENTS) do
             if helpers.file_exists(agent_path) then
                 -- Execute the polkit agent
@@ -307,10 +293,6 @@ function system.start_polkit()
 
         notify_error("No polkit agent found", "Please install a polkit agent")
     end)
-
-    if not success then
-        notify_error("Polkit startup failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -527,7 +509,7 @@ end
 -- Can be hidden to a special scratchpad workspace
 -- @function toggle_dropdown
 function system.toggle_dropdown()
-    local success, err = pcall(function()
+    helpers.safe_call("Dropdown terminal failed", function()
         local terminal_cmd = os.getenv("TERMINAL") or "kitty"
         local addr = get_dropdown_address()
 
@@ -584,10 +566,6 @@ function system.toggle_dropdown()
             end)
         end
     end)
-
-    if not success then
-        notify_error("Dropdown terminal failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -600,80 +578,78 @@ end
 -- @return string JSON with text, class, and tooltip
 -- @function battery_status
 function system.battery_status()
-    local success, result = pcall(function()
-        local batteries = {}
-        local total_capacity = 0
-        local battery_count = 0
-        local statuses = {}
+    return helpers.safe_call_with_return(
+        "Battery status check failed",
+        function()
+            local batteries = {}
+            local total_capacity = 0
+            local battery_count = 0
+            local statuses = {}
 
-        -- Check for batteries BAT0 through BAT9
-        for i = 0, 9 do
-            local bat_path = string.format("/sys/class/power_supply/BAT%d", i)
+            -- Check for batteries BAT0 through BAT9
+            for i = 0, 9 do
+                local bat_path = string.format("/sys/class/power_supply/BAT%d", i)
 
-            -- Use the capacity file's existence as a proxy for "battery present".
-            local cap_data = helpers.read_file(bat_path .. "/capacity")
-            if cap_data then
-                local capacity = tonumber(cap_data:match("%d+")) or 0
-                local status_data = helpers.read_file(bat_path .. "/status")
-                local status = status_data and status_data:gsub("%s+$", "") or "Unknown"
+                -- Use the capacity file's existence as a proxy for "battery present".
+                local cap_data = helpers.read_file(bat_path .. "/capacity")
+                if cap_data then
+                    local capacity = tonumber(cap_data:match("%d+")) or 0
+                    local status_data = helpers.read_file(bat_path .. "/status")
+                    local status = status_data and status_data:gsub("%s+$", "") or "Unknown"
 
-                table.insert(batteries, {
-                    index = i,
-                    capacity = capacity,
-                    status = status
-                })
+                    table.insert(batteries, {
+                        index = i,
+                        capacity = capacity,
+                        status = status
+                    })
 
-                total_capacity = total_capacity + capacity
-                battery_count = battery_count + 1
-                table.insert(statuses, status)
+                    total_capacity = total_capacity + capacity
+                    battery_count = battery_count + 1
+                    table.insert(statuses, status)
+                end
             end
-        end
 
-        if battery_count == 0 then
-            return '{"text": "N/A", "class": "unknown", "tooltip": "No battery found"}'
-        end
+            if battery_count == 0 then
+                return '{"text": "N/A", "class": "unknown", "tooltip": "No battery found"}'
+            end
 
-        -- Calculate average capacity and determine overall status
-        local avg_capacity = math.floor(total_capacity / battery_count)
-        local overall_status = statuses[1] or "Unknown"
+            -- Calculate average capacity and determine overall status
+            local avg_capacity = math.floor(total_capacity / battery_count)
+            local overall_status = statuses[1] or "Unknown"
 
-        -- Determine class based on capacity
-        local class
-        if avg_capacity > 60 then
-            class = "good"
-        elseif avg_capacity >= 20 then
-            class = "medium"
-        else
-            class = "low"
-        end
+            -- Determine class based on capacity
+            local class
+            if avg_capacity > 60 then
+                class = "good"
+            elseif avg_capacity >= 20 then
+                class = "medium"
+            else
+                class = "low"
+            end
 
-        -- Build tooltip
-        local tooltip_parts = {}
-        for _, bat in ipairs(batteries) do
-            table.insert(tooltip_parts, string.format("Battery %d: %d%% (%s)", bat.index, bat.capacity, bat.status))
-        end
+            -- Build tooltip
+            local tooltip_parts = {}
+            for _, bat in ipairs(batteries) do
+                table.insert(tooltip_parts, string.format("Battery %d: %d%% (%s)", bat.index, bat.capacity, bat.status))
+            end
 
-        local tooltip = table.concat(tooltip_parts, "\n")
-        if battery_count == 1 then
-            tooltip = string.format("Battery: %d%% (%s)", batteries[1].capacity, batteries[1].status)
-        end
+            local tooltip = table.concat(tooltip_parts, "\n")
+            if battery_count == 1 then
+                tooltip = string.format("Battery: %d%% (%s)", batteries[1].capacity, batteries[1].status)
+            end
 
-        -- Build JSON
-        local json = string.format(
-            '{"text": "%d%%", "class": "%s", "tooltip": "%s"}',
-            avg_capacity,
-            class,
-            tooltip:gsub("\"", "\\\"")
-        )
+            -- Build JSON
+            local json = string.format(
+                '{"text": "%d%%", "class": "%s", "tooltip": "%s"}',
+                avg_capacity,
+                class,
+                tooltip:gsub("\"", "\\\"")
+            )
 
-        return json
-    end)
-
-    if success then
-        return result
-    else
-        return '{"text": "ERR", "class": "error", "tooltip": "Failed to read battery status"}'
-    end
+            return json
+        end,
+        '{"text": "ERR", "class": "error", "tooltip": "Failed to read battery status"}'
+    )
 end
 
 -- ============================================
@@ -686,58 +662,56 @@ end
 -- @return string Formatted uptime string
 -- @function uptime
 function system.uptime()
-    local success, result = pcall(function()
-        local data = helpers.read_file("/proc/uptime")
+    return helpers.safe_call_with_return(
+        "Uptime check failed",
+        function()
+            local data = helpers.read_file("/proc/uptime")
 
-        if not data then
-            return "Error: Could not read uptime"
-        end
+            if not data then
+                return "Error: Could not read uptime"
+            end
 
-        -- Parse uptime (first number is seconds)
-        local uptime_seconds = tonumber(data:match("^(%d+)")) or 0
+            -- Parse uptime (first number is seconds)
+            local uptime_seconds = tonumber(data:match("^(%d+)")) or 0
 
-        if uptime_seconds == 0 then
-            return "up 0 seconds"
-        end
+            if uptime_seconds == 0 then
+                return "up 0 seconds"
+            end
 
-        -- Calculate days, hours, minutes
-        local days = math.floor(uptime_seconds / 86400)
-        local hours = math.floor((uptime_seconds % 86400) / 3600)
-        local minutes = math.floor((uptime_seconds % 3600) / 60)
+            -- Calculate days, hours, minutes
+            local days = math.floor(uptime_seconds / 86400)
+            local hours = math.floor((uptime_seconds % 86400) / 3600)
+            local minutes = math.floor((uptime_seconds % 3600) / 60)
 
-        -- Build parts array
-        local parts = {}
+            -- Build parts array
+            local parts = {}
 
-        if days > 0 then
-            local day_str = days == 1 and "day" or "days"
-            table.insert(parts, string.format("%d %s", days, day_str))
-        end
+            if days > 0 then
+                local day_str = days == 1 and "day" or "days"
+                table.insert(parts, string.format("%d %s", days, day_str))
+            end
 
-        if hours > 0 then
-            local hour_str = hours == 1 and "hour" or "hours"
-            table.insert(parts, string.format("%d %s", hours, hour_str))
-        end
+            if hours > 0 then
+                local hour_str = hours == 1 and "hour" or "hours"
+                table.insert(parts, string.format("%d %s", hours, hour_str))
+            end
 
-        if minutes > 0 then
-            local min_str = minutes == 1 and "minute" or "minutes"
-            table.insert(parts, string.format("%d %s", minutes, min_str))
-        end
+            if minutes > 0 then
+                local min_str = minutes == 1 and "minute" or "minutes"
+                table.insert(parts, string.format("%d %s", minutes, min_str))
+            end
 
-        -- Join parts with commas
-        local uptime_str = table.concat(parts, ", ")
+            -- Join parts with commas
+            local uptime_str = table.concat(parts, ", ")
 
-        if uptime_str == "" then
-            return "up < 1 minute"
-        end
+            if uptime_str == "" then
+                return "up < 1 minute"
+            end
 
-        return "up " .. uptime_str
-    end)
-
-    if success then
-        return result
-    else
-        return "Error: Failed to read uptime"
-    end
+            return "up " .. uptime_str
+        end,
+        "Error: Failed to read uptime"
+    )
 end
 
 -- ============================================

@@ -556,7 +556,7 @@ function wallpaper.select()
         return
     end
 
-    local success, err = pcall(function()
+    helpers.safe_call("Wallpaper select failed", function()
         hl.exec_cmd("pkill rofi 2>/dev/null || true")
 
         local focused_monitor = get_focused_monitor()
@@ -620,10 +620,6 @@ function wallpaper.select()
             end)
         end)
     end)
-
-    if not success then
-        notify.error("Wallpaper select failed", tostring(err))
-    end
 end
 
 ---Set a random wallpaper from the collection
@@ -634,7 +630,7 @@ end
 function wallpaper.random()
     local notify = require("utils.notify")
 
-    local success, err = pcall(function()
+    helpers.safe_call("Random wallpaper failed", function()
         local wallpapers = get_wallpaper_list()
 
         local images_only = {}
@@ -691,10 +687,6 @@ function wallpaper.random()
             end)
         end
     end)
-
-    if not success then
-        notify.error("Random wallpaper failed", tostring(err))
-    end
 end
 
 ---Show a rofi menu for applying ImageMagick effects
@@ -735,7 +727,7 @@ function wallpaper.effects()
         ["Zoomed"] = "-gravity Center -extent 1:1"
     }
 
-    local success, err = pcall(function()
+    helpers.safe_call("Wallpaper effects failed", function()
         hl.exec_cmd("pkill rofi 2>/dev/null || true")
 
         local effect_names = {}
@@ -834,10 +826,6 @@ function wallpaper.effects()
             end)
         end)
     end)
-
-    if not success then
-        notify.error("Wallpaper effects failed", tostring(err))
-    end
 end
 
 ---Start auto-rotation daemon for wallpapers
@@ -849,7 +837,7 @@ end
 function wallpaper.auto_change()
     local notify = require("utils.notify")
 
-    local success, err = pcall(function()
+    helpers.safe_call("Auto-change failed", function()
         local wallpapers = get_wallpaper_list()
 
         local images_only = {}
@@ -931,10 +919,6 @@ done
 
         notify.success("Auto-change daemon started (" .. AUTO_CHANGE_INTERVAL .. "s interval)")
     end)
-
-    if not success then
-        notify.error("Auto-change failed", tostring(err))
-    end
 end
 
 ---Extract colors from wallpaper and refresh
@@ -946,7 +930,7 @@ end
 function wallpaper.apply_wallust(image_path)
     local notify = require("utils.notify")
 
-    local success, err = pcall(function()
+    helpers.safe_call("Wallust application failed", function()
         local wallpaper_path = image_path
 
         if not wallpaper_path then
@@ -981,10 +965,6 @@ function wallpaper.apply_wallust(image_path)
 
         hl.exec_cmd("wallust run -s '" .. wallpaper_path .. "'")
     end)
-
-    if not success then
-        notify.error("Wallust application failed", tostring(err))
-    end
 end
 
 return wallpaper
