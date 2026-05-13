@@ -8,6 +8,65 @@
 
 local helpers = {}
 
+---Run a shell command and capture its output synchronously.
+-- hl.exec_cmd is fire-and-forget (async, returns nothing useful), so we use
+-- io.popen here for any caller that needs stdout or an exit-status check.
+--
+-- @param cmd string Shell command to run (executed via /bin/sh -c through io.popen)
+-- @return table { success = boolean, stdout = string, stderr = string }
+--   stderr is always "" — io.popen doesn't separate streams. Callers that need
+--   stderr should redirect inside `cmd` (e.g. "foo 2>&1").
+function helpers.exec(cmd)
+    local result = { success = false, stdout = "", stderr = "" }
+    local p = io.popen(cmd, "r")
+
+    if not p then
+        return result
+    end
+
+    result.stdout = p:read("*a") or ""
+
+    -- Lua 5.2+: close() returns ok, reason, code. Treat exit 0 (or true) as success.
+    -- In Hyprland's Lua keybind context, ok is always nil regardless of whether the
+    -- command succeeded or failed, so exit codes are unreliable. Since io.popen
+    -- returning non-nil already guarantees the shell launched, treat ok==nil as success.
+    local ok, _, code = p:close()
+    result.success = (ok == true) or (code == 0) or (ok == nil)
+    result.exit_code = code
+
+    return result
+end
+
+local callbacks = {}
+
+---Run a shell command asynchronously and invoke a callback upon completion.
+--
+-- @param cmd string Shell command to run (executed via /bin/sh -c through io.popen)
+-- @param cb closure The callback to invoke, receives the command exit code and
+-- output as arguments
+function helpers.exec_async(cmd, cb)
+   local id = tostring(os.time()) .. "_" .. tostring(math.random(10000, 99999))
+   callbacks[id] = cb
+
+   local outfile = "/tmp/exec_" .. id .. ".out"
+   hl.exec_cmd(string.format(
+       '%s > %s 2>&1; hyprctl eval "helpers.exec_callback(\'%s\', $?, \'%s\')"',
+       cmd, outfile, id, outfile
+   ))
+end
+
+function helpers.exec_callback(id, exit_code, outfile)
+   local cb = callbacks[id]
+   callbacks[id] = nil
+
+   if not cb then return end
+
+   local data = helpers.read_file(outfile) or ""
+   hl.exec_cmd("rm -f " .. outfile)
+
+   cb(exit_code, data)
+end
+
 ---Pause execution for a specified number of seconds
 -- Uses os.execute to spawn a sleep command
 -- Note: This blocks the current Lua execution context
@@ -66,35 +125,6 @@ function helpers.path_exists(path)
         return true
     end
     return false
-end
-
----Run a shell command and capture its output synchronously.
--- hl.exec_cmd is fire-and-forget (async, returns nothing useful), so we use
--- io.popen here for any caller that needs stdout or an exit-status check.
---
--- @param cmd string Shell command to run (executed via /bin/sh -c through io.popen)
--- @return table { success = boolean, stdout = string, stderr = string }
---   stderr is always "" — io.popen doesn't separate streams. Callers that need
---   stderr should redirect inside `cmd` (e.g. "foo 2>&1").
-function helpers.exec(cmd)
-    local result = { success = false, stdout = "", stderr = "" }
-    local p = io.popen(cmd, "r")
-
-    if not p then
-        return result
-    end
-
-    result.stdout = p:read("*a") or ""
-
-    -- Lua 5.2+: close() returns ok, reason, code. Treat exit 0 (or true) as success.
-    -- In Hyprland's Lua keybind context, ok is always nil regardless of whether the
-    -- command succeeded or failed, so exit codes are unreliable. Since io.popen
-    -- returning non-nil already guarantees the shell launched, treat ok==nil as success.
-    local ok, _, code = p:close()
-    result.success = (ok == true) or (code == 0) or (ok == nil)
-    result.exit_code = code
-
-    return result
 end
 
 ---Decode an XKB modifier bitmask into an ordered list of modifier name strings.
