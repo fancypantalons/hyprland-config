@@ -92,40 +92,26 @@ local function read_current_layout()
     return current_layout, layouts
 end
 
----Get list of keyboard device names from hyprctl
--- Filters out devices matching ignore patterns
--- @return table Array of keyboard device names
-local function get_keyboard_names()
-    local result = helpers.exec("hyprctl devices -j 2>/dev/null | jq -r '.keyboards[].name' 2>/dev/null || echo ''")
+---Get list of keyboard device names from hyprctl (async)
+-- Filters out devices matching ignore patterns.
+-- @param cb function Called with (table) array of keyboard device names
+local function get_keyboard_names(cb)
+    helpers.exec_async(
+        "hyprctl devices -j 2>/dev/null | jq -r '.keyboards[].name' 2>/dev/null || echo ''",
+        function(_, stdout)
+            local keyboards = {}
 
-    if not result.success or result.stdout == "" then
-        return {}
-    end
+            for line in stdout:gmatch("[^\r\n]+") do
+                local name = line:gsub("%s+$", "")
 
-    local keyboards = {}
-
-    for line in result.stdout:gmatch("[^\r\n]+") do
-        local name = line:gsub("%s+$", "")
-
-        if name ~= "" then
-            -- Check if device should be ignored
-            local ignored = false
-
-            for _, pattern in ipairs(IGNORE_PATTERNS) do
-                if name:match(pattern) then
-                    ignored = true
-
-                    break
+                if name ~= "" and not is_ignored(name) then
+                    table.insert(keyboards, name)
                 end
             end
 
-            if not ignored then
-                table.insert(keyboards, name)
-            end
+            cb(keyboards)
         end
-    end
-
-    return keyboards
+    )
 end
 
 ---Check if a device name matches any ignore pattern
@@ -155,7 +141,6 @@ function input.switch_layout()
         local current_layout, layouts, read_err = read_current_layout()
 
         if not current_layout then
-            local notify = require("utils.notify")
             notify.error("Failed to read keyboard layouts", read_err)
 
             return
@@ -176,49 +161,35 @@ function input.switch_layout()
         local next_index = (current_index % #layouts) + 1
         local new_layout = layouts[next_index]
 
-        -- Get keyboard names
-        local keyboards = get_keyboard_names()
+        -- Fetch keyboards async, then switch and notify in the callback
+        get_keyboard_names(function(keyboards)
+            pcall(function()
+                if #keyboards == 0 then
+                    notify.error("No keyboards found")
 
-        if #keyboards == 0 then
-            local notify = require("utils.notify")
-            notify.error("No keyboards found")
-
-            return
-        end
-
-        -- Switch layout on all keyboards
-        local error_found = false
-
-        for _, keyboard_name in ipairs(keyboards) do
-            if is_ignored(keyboard_name) then
-                -- Skip ignored devices
-            else
-                local switch_result = helpers.exec(string.format("hyprctl switchxkblayout '%s' %d", keyboard_name, next_index - 1))
-
-                if not switch_result.success then
-                    error_found = true
+                    return
                 end
-            end
-        end
 
-        if error_found then
-            local notify = require("utils.notify")
-            notify.error("Some keyboards failed to switch layout")
-        end
+                for _, keyboard_name in ipairs(keyboards) do
+                    hl.exec_cmd(string.format(
+                        "hyprctl switchxkblayout '%s' %d",
+                        keyboard_name,
+                        next_index - 1
+                    ))
+                end
 
-        -- Save new layout to cache
-        helpers.write_file(LAYOUT_CACHE_FILE, new_layout)
+                helpers.write_file(LAYOUT_CACHE_FILE, new_layout)
 
-        -- Show notification
-        notify.send({
-            text = string.format("kb_layout: %s", new_layout),
-            icon = NOTIF_ICON,
-            timeout = 2000
-        })
+                notify.send({
+                    text = string.format("kb_layout: %s", new_layout),
+                    icon = NOTIF_ICON,
+                    timeout = 2000
+                })
+            end)
+        end)
     end)
 
     if not success then
-        local notify = require("utils.notify")
         notify.error("Layout switch failed", tostring(err))
     end
 end

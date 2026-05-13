@@ -2057,187 +2057,173 @@ end
 -- ============================================
 
 ---Music player with online stations and local music support
--- Opens a rofi menu with options to play from online stations,
--- local music directory, shuffle play, or stop playback.
--- Uses mpv for playback with notifications.
+-- Async: menus are chained via exec_async so rofi doesn't block the compositor.
 -- @function beats
 function rofi.beats()
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local notify = require("utils.notify")
-        local menu_options = "Play from Online Stations\nPlay from Music directory\nShuffle Play from Music directory\nStop RofiBeats"
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -dmenu -config %s",
-            menu_options,
-            ROFI_THEME_BEATS_MENU
-        )
-        local result = helpers.exec(rofi_cmd)
+    local notify = require("utils.notify")
+    local menu_options = "Play from Online Stations\nPlay from Music directory\nShuffle Play from Music directory\nStop RofiBeats"
+    local rofi_cmd = string.format(
+        "echo '%s' | rofi -dmenu -config %s",
+        menu_options,
+        ROFI_THEME_BEATS_MENU
+    )
 
-        if (not result.success or result.stdout == nil or result.stdout == "") then
-            return
-        end
-
-        local choice = string.gsub(result.stdout, "%s+$", "")
-
-        if (choice == "Play from Online Stations") then
-            -- Build online stations list
-            local station_list = {}
-
-            for name, _ in pairs(ONLINE_STATIONS) do
-                table.insert(station_list, name)
-            end
-
-            table.sort(station_list)
-
-            local station_str = table.concat(station_list, "\n")
-            local station_result = helpers.exec(string.format(
-                "echo '%s' | rofi -i -dmenu -config %s",
-                station_str,
-                ROFI_THEME_BEATS
-            ))
-
-            if (not station_result.success or station_result.stdout == nil or station_result.stdout == "") then
+    helpers.exec_async(rofi_cmd, function(_, choice)
+        pcall(function()
+            if choice == nil or choice == "" then
                 return
             end
 
-            local station_choice = string.gsub(station_result.stdout, "%s+$", "")
-            local url = ONLINE_STATIONS[station_choice]
+            choice = string.gsub(choice, "%s+$", "")
 
-            if (url == nil) then
-                return
+            if (choice == "Play from Online Stations") then
+                local station_list = {}
+
+                for name, _ in pairs(ONLINE_STATIONS) do
+                    table.insert(station_list, name)
+                end
+
+                table.sort(station_list)
+
+                local station_str = table.concat(station_list, "\n")
+
+                helpers.exec_async(string.format(
+                    "echo '%s' | rofi -i -dmenu -config %s",
+                    station_str,
+                    ROFI_THEME_BEATS
+                ), function(_, station_choice)
+                    if station_choice == nil or station_choice == "" then
+                        return
+                    end
+
+                    station_choice = string.gsub(station_choice, "%s+$", "")
+                    local url = ONLINE_STATIONS[station_choice]
+
+                    if (url == nil) then
+                        return
+                    end
+
+                    if (is_music_playing()) then
+                        stop_music()
+                    end
+
+                    notify_music(station_choice)
+                    hl.exec_cmd(string.format("mpv --shuffle --vid=no '%s' &", url))
+                end)
+
+            elseif (choice == "Play from Music directory") then
+                local music_files = get_local_music_files()
+
+                if (#music_files == 0) then
+                    notify.error("No music files found in " .. MUSIC_DIR)
+
+                    return
+                end
+
+                local filenames = {}
+                local filename_to_path = {}
+
+                for _, filepath in ipairs(music_files) do
+                    local fname = basename(filepath)
+                    table.insert(filenames, fname)
+                    filename_to_path[fname] = filepath
+                end
+
+                table.sort(filenames)
+
+                local file_str = table.concat(filenames, "\n")
+
+                helpers.exec_async(string.format(
+                    "echo '%s' | rofi -i -dmenu -config %s",
+                    file_str,
+                    ROFI_THEME_BEATS
+                ), function(_, file_choice)
+                    if file_choice == nil or file_choice == "" then
+                        return
+                    end
+
+                    file_choice = string.gsub(file_choice, "%s+$", "")
+
+                    if (is_music_playing()) then
+                        stop_music()
+                    end
+
+                    notify_music(file_choice)
+                    hl.exec_cmd(string.format("cd '%s' && mpv --loop-playlist --vid=no '%s' &", MUSIC_DIR, file_choice))
+                end)
+
+            elseif (choice == "Shuffle Play from Music directory") then
+                if (is_music_playing()) then
+                    stop_music()
+                end
+
+                notify.send({
+                    text = "Shuffle Play local music",
+                    icon = ICON_DIR .. "/music.png",
+                    timeout = 3000
+                })
+
+                hl.exec_cmd(string.format("mpv --shuffle --loop-playlist --vid=no '%s' &", MUSIC_DIR))
+
+            elseif (choice == "Stop RofiBeats") then
+                if (is_music_playing()) then
+                    stop_music()
+                end
             end
-
-            if (is_music_playing()) then
-                stop_music()
-            end
-
-            notify_music(station_choice)
-            hl.exec_cmd(string.format("mpv --shuffle --vid=no '%s' &", url))
-
-        elseif (choice == "Play from Music directory") then
-            local music_files = get_local_music_files()
-
-            if (#music_files == 0) then
-                notify.error("No music files found in " .. MUSIC_DIR)
-
-                return
-            end
-
-            -- Build filename list
-            local filenames = {}
-            local filename_to_path = {}
-
-            for _, filepath in ipairs(music_files) do
-                local fname = basename(filepath)
-                table.insert(filenames, fname)
-                filename_to_path[fname] = filepath
-            end
-
-            table.sort(filenames)
-
-            local file_str = table.concat(filenames, "\n")
-            local file_result = helpers.exec(string.format(
-                "echo '%s' | rofi -i -dmenu -config %s",
-                file_str,
-                ROFI_THEME_BEATS
-            ))
-
-            if (not file_result.success or file_result.stdout == nil or file_result.stdout == "") then
-                return
-            end
-
-            local file_choice = string.gsub(file_result.stdout, "%s+$", "")
-
-            if (is_music_playing()) then
-                stop_music()
-            end
-
-            notify_music(file_choice)
-            -- Play with playlist support starting from selected file
-            hl.exec_cmd(string.format("cd '%s' && mpv --loop-playlist --vid=no '%s' &", MUSIC_DIR, file_choice))
-
-        elseif (choice == "Shuffle Play from Music directory") then
-            if (is_music_playing()) then
-                stop_music()
-            end
-
-            notify.send({
-                text = "Shuffle Play local music",
-                icon = ICON_DIR .. "/music.png",
-                timeout = 3000
-            })
-
-            hl.exec_cmd(string.format("mpv --shuffle --loop-playlist --vid=no '%s' &", MUSIC_DIR))
-
-        elseif (choice == "Stop RofiBeats") then
-            if (is_music_playing()) then
-                stop_music()
-            end
-        end
+        end)
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("RofiBeats failed", tostring(err))
-    end
 end
 
 ---Interactive calculator using qalc
 -- Opens a rofi input that passes expressions to qalc.
 -- Shows the result in the rofi message and copies to clipboard.
+-- Uses a recursive async pattern so rofi never blocks the compositor.
 -- @function calc
 function rofi.calc()
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local notify = require("utils.notify")
-        local calc_result = ""
-        local last_input = ""
+    local notify = require("utils.notify")
 
-        while true do
-            local mesg = ""
+    local function calc_loop(calc_result, last_input)
+        local mesg = ""
 
-            if (calc_result ~= "" and last_input ~= "") then
-                mesg = string.format("%s      =    %s", last_input, calc_result)
-            end
-
-            local rofi_cmd = string.format(
-                "rofi -i -dmenu -config %s -mesg '%s'",
-                ROFI_THEME_CALC,
-                mesg
-            )
-
-            local result = helpers.exec(rofi_cmd)
-
-            if (not result.success) then
-                break
-            end
-
-            local input = string.gsub(result.stdout or "", "%s+$", "")
-
-            if (input == "") then
-                break
-            end
-
-            last_input = input
-
-            -- Calculate with qalc
-            local qalc_result = helpers.exec(string.format("qalc -t '%s'", input))
-
-            if (qalc_result.success and qalc_result.stdout) then
-                calc_result = string.gsub(qalc_result.stdout, "%s+$", "")
-
-                -- Copy to clipboard
-                hl.exec_cmd(string.format("echo '%s' | wl-copy", calc_result))
-            end
+        if (calc_result ~= "" and last_input ~= "") then
+            mesg = string.format("%s      =    %s", last_input, calc_result)
         end
-    end)
 
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("RofiCalc failed", tostring(err))
+        local rofi_cmd = string.format(
+            "rofi -i -dmenu -config %s -mesg '%s'",
+            ROFI_THEME_CALC,
+            mesg
+        )
+
+        helpers.exec_async(rofi_cmd, function(_, input)
+            pcall(function()
+                if input == nil then
+                    return
+                end
+
+                input = string.gsub(input, "%s+$", "")
+
+                if (input == "") then
+                    return
+                end
+
+                local qalc_result = helpers.exec(string.format("qalc -t '%s'", input))
+
+                if (qalc_result.success and qalc_result.stdout) then
+                    calc_result = string.gsub(qalc_result.stdout, "%s+$", "")
+                    hl.exec_cmd(string.format("echo '%s' | wl-copy", calc_result))
+                end
+
+                calc_loop(calc_result, input)
+            end)
+        end)
     end
+
+    calc_loop("", "")
 end
 
 ---Emoji picker with copy to clipboard
@@ -2245,48 +2231,36 @@ end
 -- Selected emoji is copied to clipboard with usage instructions.
 -- @function emoji
 function rofi.emoji()
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local notify = require("utils.notify")
-        local msg = "** note ** 👀 Click or Return to choose || Ctrl V to Paste"
+    local notify = require("utils.notify")
+    local msg = "** note ** 👀 Click or Return to choose || Ctrl V to Paste"
 
-        -- Create temp file with emoji data
-        local tmpfile = "/tmp/rofi-emoji-data-" .. tostring(os.time())
-        local ok, write_err = helpers.write_file(tmpfile, EMOJI_DATA)
+    local tmpfile = "/tmp/rofi-emoji-data-" .. tostring(os.time())
+    local ok, write_err = helpers.write_file(tmpfile, EMOJI_DATA)
 
-        if not ok then
-            notify.error("Failed to create emoji data file", write_err)
+    if not ok then
+        notify.error("Failed to create emoji data file", write_err)
 
-            return
-        end
+        return
+    end
 
-        -- Run rofi with emoji data
-        local rofi_cmd = string.format(
-            "cat %s | rofi -i -dmenu -mesg '%s' -config %s | awk '{print $1}' | head -n 1 | tr -d '\n' | wl-copy",
-            tmpfile,
-            msg,
-            ROFI_THEME_EMOJI
-        )
+    local rofi_cmd = string.format(
+        "cat %s | rofi -i -dmenu -mesg '%s' -config %s | awk '{print $1}' | head -n 1 | tr -d '\n' | wl-copy",
+        tmpfile,
+        msg,
+        ROFI_THEME_EMOJI
+    )
 
-        local result = helpers.exec(rofi_cmd)
-
-        -- Cleanup temp file
+    helpers.exec_async(rofi_cmd, function(_, _)
         hl.exec_cmd("rm -f " .. tmpfile)
 
-        if (result.success) then
-            notify.send({
-                text = "Emoji copied to clipboard",
-                icon = ICON_DIR .. "/info.png",
-                timeout = 2000
-            })
-        end
+        notify.send({
+            text = "Emoji copied to clipboard",
+            icon = ICON_DIR .. "/info.png",
+            timeout = 2000
+        })
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("RofiEmoji failed", tostring(err))
-    end
 end
 
 ---Google search via rofi
@@ -2294,230 +2268,188 @@ end
 -- Uses Search_Engine from UserConfigs/01-UserDefaults.conf
 -- @function search
 function rofi.search()
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local notify = require("utils.notify")
-        local search_engine = get_search_engine()
+    local notify = require("utils.notify")
+    local search_engine = get_search_engine()
 
-        if (search_engine == nil or search_engine == "") then
-            search_engine = "https://www.google.com/search?q="
-        end
+    if (search_engine == nil or search_engine == "") then
+        search_engine = "https://www.google.com/search?q="
+    end
 
-        local msg = "‼️ **note** ‼️ search via default web browser"
+    local msg = "‼️ **note** ‼️ search via default web browser"
 
-        local rofi_cmd = string.format(
-            "echo '' | rofi -dmenu -config %s -mesg '%s'",
-            ROFI_THEME_SEARCH,
-            msg
-        )
+    local rofi_cmd = string.format(
+        "echo '' | rofi -dmenu -config %s -mesg '%s'",
+        ROFI_THEME_SEARCH,
+        msg
+    )
 
-        local result = helpers.exec(rofi_cmd)
-
-        if (not result.success or result.stdout == nil or result.stdout == "") then
+    helpers.exec_async(rofi_cmd, function(_, query)
+        if query == nil or query == "" then
             return
         end
 
-        local query = string.gsub(result.stdout, "%s+$", "")
+        query = string.gsub(query, "%s+$", "")
 
         if (query ~= "") then
-            local url = search_engine .. query
-            hl.exec_cmd(string.format("xdg-open '%s' &", url))
+            hl.exec_cmd(string.format("xdg-open '%s' &", search_engine .. query))
         end
     end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("RofiSearch failed", tostring(err))
-    end
 end
 
 ---Rofi theme selector with live preview
 -- Lists available rofi themes and allows live preview.
+-- Recursive exec_async pattern so rofi never blocks the compositor.
 -- Keybindings: Enter=preview, Ctrl+S=apply, Esc=cancel
 -- @function theme_selector
 function rofi.theme_selector()
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local notify = require("utils.notify")
+    local notify = require("utils.notify")
 
-        -- Check directories exist
-        local config_exists = helpers.exec(string.format("test -d '%s'", ROFI_THEMES_DIR_CONFIG)).success
-        local local_exists = helpers.exec(string.format("test -d '%s'", ROFI_THEMES_DIR_LOCAL)).success
+    -- Check directories exist
+    local config_exists = helpers.path_exists(ROFI_THEMES_DIR_CONFIG)
+    local local_exists = helpers.path_exists(ROFI_THEMES_DIR_LOCAL)
 
-        if (not config_exists and not local_exists) then
-            notify.error("No Rofi themes directory found")
+    if (not config_exists and not local_exists) then
+        notify.error("No Rofi themes directory found")
+
+        return
+    end
+
+    if not helpers.path_exists(ROFI_CONFIG_FILE) then
+        notify.error("Rofi config file not found")
+
+        return
+    end
+
+    local original_config, read_err = helpers.read_file(ROFI_CONFIG_FILE)
+
+    if not original_config then
+        notify.error("Failed to backup rofi config", read_err)
+
+        return
+    end
+
+    local theme_cmd = string.format(
+        "(find '%s' -maxdepth 1 -name '*.rasi' -type f -printf '%%f\\n' 2>/dev/null; find '%s' -maxdepth 1 -name '*.rasi' -type f -printf '%%f\\n' 2>/dev/null) | sort -V -u",
+        ROFI_THEMES_DIR_CONFIG,
+        ROFI_THEMES_DIR_LOCAL
+    )
+
+    local themes_result = helpers.exec(theme_cmd)
+
+    if (not themes_result.success or themes_result.stdout == nil or themes_result.stdout == "") then
+        notify.error("No .rasi theme files found")
+
+        return
+    end
+
+    local themes = {}
+
+    for line in string.gmatch(themes_result.stdout, "[^\n]+") do
+        if (line ~= "" and line ~= nil) then
+            table.insert(themes, line)
+        end
+    end
+
+    if (#themes == 0) then
+        notify.error("No themes found")
+
+        return
+    end
+
+    -- Get current theme
+    local current_theme_result = helpers.exec(string.format("grep -oP '^\\s*@theme\\s*\"\\K[^\"]+' '%s' | tail -n 1", ROFI_CONFIG_FILE))
+    local current_theme = ""
+
+    if (current_theme_result.success and current_theme_result.stdout) then
+        current_theme = basename(string.gsub(current_theme_result.stdout, "%s+$", ""))
+    end
+
+    local current_index = 0
+
+    for i, theme in ipairs(themes) do
+        if (theme == current_theme) then
+            current_index = i - 1
+
+            break
+        end
+    end
+
+    local function theme_loop(selected_index)
+        local theme_to_preview = themes[selected_index + 1]
+
+        if (theme_to_preview == nil) then
+            return
+        end
+
+        local theme_path = nil
+        local config_path = ROFI_THEMES_DIR_CONFIG .. "/" .. theme_to_preview
+        local local_path = ROFI_THEMES_DIR_LOCAL .. "/" .. theme_to_preview
+
+        if helpers.path_exists(config_path) then
+            theme_path = config_path
+        elseif helpers.path_exists(local_path) then
+            theme_path = local_path
+        end
+
+        if (theme_path == nil) then
+            helpers.write_file(ROFI_CONFIG_FILE, original_config)
+            notify.error("Theme file not found, reverted to original")
 
             return
         end
 
-        -- Check config file exists
-        local config_exists_file = helpers.exec(string.format("test -f '%s'", ROFI_CONFIG_FILE)).success
+        local theme_path_tilde = "~" .. string.sub(theme_path, string.len(HOME) + 1)
 
-        if (not config_exists_file) then
-            notify.error("Rofi config file not found")
+        local temp_config = string.gsub(original_config, "\n(@theme)", "\n//%1")
+        temp_config = temp_config .. "\n@theme \"" .. theme_path_tilde .. "\"\n"
 
-            return
+        helpers.write_file(ROFI_CONFIG_FILE, temp_config)
+
+        local theme_names = {}
+
+        for _, t in ipairs(themes) do
+            table.insert(theme_names, string.gsub(t, "%.rasi$", ""))
         end
 
-        -- Backup original config
-        local original_config, read_err = helpers.read_file(ROFI_CONFIG_FILE)
+        local rofi_input = table.concat(theme_names, "\n")
 
-        if not original_config then
-            notify.error("Failed to backup rofi config", read_err)
-
-            return
-        end
-
-        -- Get list of themes
-        local theme_cmd = string.format(
-            "(find '%s' -maxdepth 1 -name '*.rasi' -type f -printf '%%f\\n' 2>/dev/null; find '%s' -maxdepth 1 -name '*.rasi' -type f -printf '%%f\\n' 2>/dev/null) | sort -V -u",
-            ROFI_THEMES_DIR_CONFIG,
-            ROFI_THEMES_DIR_LOCAL
+        local rofi_cmd = string.format(
+            "echo '%s' | rofi -dmenu -i -format 'i' -p 'Rofi Theme' -mesg '‼️ **note** ‼️ Enter: Preview || Ctrl+S: Apply & Exit || Esc: Cancel' -config '%s' -selected-row %d -kb-custom-1 'Control+s'",
+            rofi_input,
+            ROFI_THEME_SELECTOR,
+            selected_index
         )
 
-        local themes_result = helpers.exec(theme_cmd)
+        helpers.exec_async(rofi_cmd, function(exit_code, chosen_str)
+            pcall(function()
+                local chosen_index = tonumber(string.gsub(chosen_str or "", "%s+$", ""))
 
-        if (not themes_result.success or themes_result.stdout == nil or themes_result.stdout == "") then
-            notify.error("No .rasi theme files found")
+                if exit_code == 0 and chosen_index ~= nil and chosen_index >= 0 and chosen_index < #themes then
+                    theme_loop(chosen_index)
+                elseif exit_code == 1 or chosen_index == nil then
+                    helpers.write_file(ROFI_CONFIG_FILE, original_config)
 
-            return
-        end
-
-        -- Parse themes into array
-        local themes = {}
-
-        for line in string.gmatch(themes_result.stdout, "[^\n]+") do
-            if (line ~= "" and line ~= nil) then
-                table.insert(themes, line)
-            end
-        end
-
-        if (#themes == 0) then
-            notify.error("No themes found")
-
-            return
-        end
-
-        -- Get current theme
-        local current_theme_result = helpers.exec(string.format("grep -oP '^\\s*@theme\\s*\"\\K[^\"]+' '%s' | tail -n 1", ROFI_CONFIG_FILE))
-        local current_theme = ""
-
-        if (current_theme_result.success and current_theme_result.stdout) then
-            current_theme = basename(string.gsub(current_theme_result.stdout, "%s+$", ""))
-        end
-
-        -- Find current theme index
-        local current_index = 0
-
-        for i, theme in ipairs(themes) do
-            if (theme == current_theme) then
-                current_index = i - 1
-
-                break
-            end
-        end
-
-        -- Main preview loop
-        local selected_index = current_index
-        local running = true
-
-        while running do
-            local theme_to_preview = themes[selected_index + 1]
-
-            if (theme_to_preview == nil) then
-                break
-            end
-
-            -- Find full path
-            local theme_path = nil
-            local config_path = ROFI_THEMES_DIR_CONFIG .. "/" .. theme_to_preview
-            local local_path = ROFI_THEMES_DIR_LOCAL .. "/" .. theme_to_preview
-
-            if (helpers.exec(string.format("test -f '%s'", config_path)).success) then
-                theme_path = config_path
-            elseif (helpers.exec(string.format("test -f '%s'", local_path)).success) then
-                theme_path = local_path
-            end
-
-            if (theme_path == nil) then
-                helpers.write_file(ROFI_CONFIG_FILE, original_config)
-                notify.error("Theme file not found, reverted to original")
-
-                return
-            end
-
-            -- Apply theme to config
-            local theme_path_tilde = "~" .. string.sub(theme_path, string.len(HOME) + 1)
-
-            -- Comment out existing @theme entries and add new one
-            local temp_config = string.gsub(original_config, "\n(@theme)", "\n//%1")
-            temp_config = temp_config .. "\n@theme \"" .. theme_path_tilde .. "\"\n"
-
-            helpers.write_file(ROFI_CONFIG_FILE, temp_config)
-
-            -- Build rofi input
-            local theme_names = {}
-
-            for _, t in ipairs(themes) do
-                table.insert(theme_names, string.gsub(t, "%.rasi$", ""))
-            end
-
-            local rofi_input = table.concat(theme_names, "\n")
-
-            -- Launch rofi
-            local rofi_cmd = string.format(
-                "echo '%s' | rofi -dmenu -i -format 'i' -p 'Rofi Theme' -mesg '‼️ **note** ‼️ Enter: Preview || Ctrl+S: Apply & Exit || Esc: Cancel' -config '%s' -selected-row %d -kb-custom-1 'Control+s'",
-                rofi_input,
-                ROFI_THEME_SELECTOR,
-                selected_index
-            )
-
-            local rofi_result = helpers.exec(rofi_cmd)
-            local exit_code = 0
-
-            if (not rofi_result.success) then
-                exit_code = 1
-            end
-
-            -- Parse exit code from result (rofi returns non-zero on special exits)
-            -- Note: hl.exec_cmd doesn't directly give us exit code, we infer from behavior
-            -- For simplicity, we'll handle based on stdout content
-
-            local chosen_index = tonumber(string.gsub(rofi_result.stdout or "", "%s+$", ""))
-
-            if (exit_code == 0 and chosen_index ~= nil and chosen_index >= 0 and chosen_index < #themes) then
-                -- Enter pressed - preview selected theme
-                selected_index = chosen_index
-            elseif (exit_code == 1 or chosen_index == nil) then
-                -- Escape or cancel - restore original
-                helpers.write_file(ROFI_CONFIG_FILE, original_config)
-
-                notify.send({
-                    text = "Theme selection cancelled",
-                    icon = ICON_DIR .. "/note.png",
-                    timeout = 2000
-                })
-
-                running = false
-            else
-                -- Ctrl+S or apply - keep current theme
-                notify.send({
-                    text = "Rofi Theme Applied: " .. string.gsub(theme_to_preview, "%.rasi$", ""),
-                    icon = ICON_DIR .. "/ja.png",
-                    timeout = 2000
-                })
-
-                running = false
-            end
-        end
-    end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("RofiThemeSelector failed", tostring(err))
+                    notify.send({
+                        text = "Theme selection cancelled",
+                        icon = ICON_DIR .. "/note.png",
+                        timeout = 2000
+                    })
+                else
+                    notify.send({
+                        text = "Rofi Theme Applied: " .. string.gsub(theme_to_preview, "%.rasi$", ""),
+                        icon = ICON_DIR .. "/ja.png",
+                        timeout = 2000
+                    })
+                end
+            end)
+        end)
     end
+
+    theme_loop(current_index)
 end
 
 ---Animation style picker
@@ -2604,9 +2536,10 @@ function rofi.animations()
             timeout = 2000
         })
 
-        -- Run refresh (no waybar restart)
-        helpers.sleep(0.5)
-        refresh.refresh_ui_no_waybar()
+        -- Run refresh (no waybar restart, async)
+        helpers.exec_async("sleep 0.5", function(_, _)
+            refresh.refresh_ui_no_waybar()
+        end)
     end)
 
     if (not success) then

@@ -319,127 +319,70 @@ end
 -- MEDIA PLAYBACK
 -- ============================================
 
+---Run a playerctl action, wait, then parse status + metadata from a single
+--- shell invocation and deliver an appropriate notification.
+--- @param action string The playerctl command (e.g. "play-pause", "next", "previous")
+--- @param has_status boolean When true, also checks playerctl status for Playing/Paused
+local function exec_media_action(action, has_status)
+    local cmd = string.format(
+        "playerctl %s; sleep 0.1; " ..
+        "echo \"%s$(playerctl metadata title)\n$(playerctl metadata artist)\"",
+        action,
+        has_status and "$(playerctl status)\n" or ""
+    )
+
+    helpers.exec_async(cmd, function(_, out)
+        pcall(function()
+            local lines = {}
+
+            for line in out:gmatch("[^\r\n]+") do
+                table.insert(lines, line:gsub("%s+$", ""))
+            end
+
+            if has_status then
+                local status = lines[1] or ""
+
+                if status == "Playing" then
+                    local title = lines[2] or "Unknown"
+                    local artist = lines[3] or "Unknown"
+                    notify_media("Now Playing", string.format("%s by %s", title, artist))
+                elseif status == "Paused" then
+                    notify_media("Playback", "Paused")
+                end
+            else
+                local title = lines[1] or "Unknown"
+                local artist = lines[2] or "Unknown"
+                notify_media("Now Playing", string.format("%s by %s", title, artist))
+            end
+        end)
+    end)
+end
+
 ---Play or pause the current media
--- Shows a notification with the current playback state and track info
 -- @function media_play
 function audio.media_play()
-    local success, err = pcall(function()
-        local result = helpers.exec("playerctl play-pause")
-
-        if not result.success then
-            local notify = require("utils.notify")
-            notify.error("Failed to toggle playback", result.stderr)
-
-            return
-        end
-
-        helpers.sleep(0.1)
-
-        local status_result = helpers.exec("playerctl status")
-
-        if status_result.success then
-            local status = status_result.stdout:gsub("%s+$", "")
-
-            if status == "Playing" then
-                local title_result = helpers.exec("playerctl metadata title")
-                local artist_result = helpers.exec("playerctl metadata artist")
-                local title = title_result.success and title_result.stdout:gsub("%s+$", "") or "Unknown"
-                local artist = artist_result.success and artist_result.stdout:gsub("%s+$", "") or "Unknown"
-
-                notify_media("Now Playing", string.format("%s by %s", title, artist))
-            elseif status == "Paused" then
-                notify_media("Playback", "Paused")
-            end
-        end
-    end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Media play failed", tostring(err))
-    end
+    exec_media_action("play-pause", true)
 end
 
 ---Skip to the next track
--- Shows a notification with the new track information
 -- @function media_next
 function audio.media_next()
-    local success, err = pcall(function()
-        local result = helpers.exec("playerctl next")
-
-        if not result.success then
-            local notify = require("utils.notify")
-            notify.error("Failed to skip track", result.stderr)
-
-            return
-        end
-
-        helpers.sleep(0.1)
-
-        local title_result = helpers.exec("playerctl metadata title")
-        local artist_result = helpers.exec("playerctl metadata artist")
-        local title = title_result.success and title_result.stdout:gsub("%s+$", "") or "Unknown"
-        local artist = artist_result.success and artist_result.stdout:gsub("%s+$", "") or "Unknown"
-
-        notify_media("Now Playing", string.format("%s by %s", title, artist))
-    end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Media next failed", tostring(err))
-    end
+    exec_media_action("next", false)
 end
 
 ---Go back to the previous track
--- Shows a notification with the track information
 -- @function media_prev
 function audio.media_prev()
-    local success, err = pcall(function()
-        local result = helpers.exec("playerctl previous")
-
-        if not result.success then
-            local notify = require("utils.notify")
-            notify.error("Failed to go to previous track", result.stderr)
-
-            return
-        end
-
-        helpers.sleep(0.1)
-
-        local title_result = helpers.exec("playerctl metadata title")
-        local artist_result = helpers.exec("playerctl metadata artist")
-        local title = title_result.success and title_result.stdout:gsub("%s+$", "") or "Unknown"
-        local artist = artist_result.success and artist_result.stdout:gsub("%s+$", "") or "Unknown"
-
-        notify_media("Now Playing", string.format("%s by %s", title, artist))
-    end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Media previous failed", tostring(err))
-    end
+    exec_media_action("previous", false)
 end
 
 ---Stop media playback
 -- Shows a notification indicating playback has stopped
 -- @function media_stop
 function audio.media_stop()
-    local success, err = pcall(function()
-        local result = helpers.exec("playerctl stop")
-
-        if not result.success then
-            local notify = require("utils.notify")
-            notify.error("Failed to stop playback", result.stderr)
-
-            return
-        end
-
+    helpers.exec_async("playerctl stop", function(_, _)
         notify_media("Playback", "Stopped")
     end)
-
-    if not success then
-        local notify = require("utils.notify")
-        notify.error("Media stop failed", tostring(err))
-    end
 end
 
 return audio

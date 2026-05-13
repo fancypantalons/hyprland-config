@@ -135,60 +135,54 @@ end
 function waybar.select_style()
     local notify = require("utils.notify")
 
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local styles = get_available_styles()
+    local styles = get_available_styles()
 
-        if (#styles == 0) then
-            notify.error("No styles found", "Check " .. WAYBAR_STYLE_DIR)
+    if (#styles == 0) then
+        notify.error("No styles found", "Check " .. WAYBAR_STYLE_DIR)
 
-            return
-        end
-
-        local current_style = get_current_style()
-        local menu_items = {}
-        local default_row = 0
-
-        for i, style in ipairs(styles) do
-            if (style == current_style) then
-                table.insert(menu_items, MARKER .. " " .. style)
-                default_row = i - 1
-            else
-                table.insert(menu_items, style)
-            end
-        end
-
-        local menu_input = table.concat(menu_items, "\n")
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -i -dmenu -config '%s' -mesg '%s' -selected-row %d",
-            menu_input:gsub("'", "'\"'\"'"),
-            ROFI_STYLE_CONFIG,
-            STYLE_MSG,
-            default_row
-        )
-
-        local result = helpers.exec(rofi_cmd)
-
-        if not result.success or result.stdout == "" then
-            return
-        end
-
-        local choice = result.stdout:gsub("%s+$", "")
-
-        if (choice == "") then
-            return
-        end
-
-        -- Remove marker if present
-        choice = choice:gsub("^" .. MARKER .. " ", "")
-
-        apply_style(choice)
-    end)
-
-    if not success then
-        notify.error("Waybar style selection failed", tostring(err))
+        return
     end
+
+    local current_style = get_current_style()
+    local menu_items = {}
+    local default_row = 0
+
+    for i, style in ipairs(styles) do
+        if (style == current_style) then
+            table.insert(menu_items, MARKER .. " " .. style)
+            default_row = i - 1
+        else
+            table.insert(menu_items, style)
+        end
+    end
+
+    local menu_input = table.concat(menu_items, "\n")
+    local rofi_cmd = string.format(
+        "echo '%s' | rofi -i -dmenu -config '%s' -mesg '%s' -selected-row %d",
+        menu_input:gsub("'", "'\"'\"'"),
+        ROFI_STYLE_CONFIG,
+        STYLE_MSG,
+        default_row
+    )
+
+    helpers.exec_async(rofi_cmd, function(_, choice)
+        pcall(function()
+            if choice == nil or choice == "" then
+                return
+            end
+
+            choice = choice:gsub("%s+$", "")
+
+            if (choice == "") then
+                return
+            end
+
+            choice = choice:gsub("^" .. MARKER .. " ", "")
+            apply_style(choice)
+        end)
+    end)
 end
 
 ---Show a rofi menu for selecting waybar layout
@@ -200,65 +194,59 @@ end
 function waybar.select_layout()
     local notify = require("utils.notify")
 
-    local success, err = pcall(function()
-        kill_rofi()
+    kill_rofi()
 
-        local layouts = get_available_layouts()
+    local layouts = get_available_layouts()
 
-        if (#layouts == 0) then
-            notify.error("No layouts found", "Check " .. WAYBAR_LAYOUT_DIR)
+    if (#layouts == 0) then
+        notify.error("No layouts found", "Check " .. WAYBAR_LAYOUT_DIR)
 
-            return
-        end
-
-        local current_layout = get_current_layout()
-        local menu_items = {}
-        local default_row = 0
-
-        for i, layout in ipairs(layouts) do
-            if (layout == current_layout) then
-                table.insert(menu_items, MARKER .. " " .. layout)
-                default_row = i - 1
-            else
-                table.insert(menu_items, layout)
-            end
-        end
-
-        local menu_input = table.concat(menu_items, "\n")
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -i -dmenu -config '%s' -mesg '%s' -selected-row %d",
-            menu_input:gsub("'", "'\"'\"'"),
-            ROFI_LAYOUT_CONFIG,
-            LAYOUT_MSG,
-            default_row
-        )
-
-        local result = helpers.exec(rofi_cmd)
-
-        if not result.success or result.stdout == "" then
-            return
-        end
-
-        local choice = result.stdout:gsub("%s+$", "")
-
-        if (choice == "") then
-            return
-        end
-
-        -- Remove marker if present
-        choice = choice:gsub("^" .. MARKER .. " ", "")
-
-        if (choice == "no panel") then
-            -- Kill waybar for "no panel" option
-            hl.exec_cmd("pkill waybar 2>/dev/null || true")
-        else
-            apply_layout(choice)
-        end
-    end)
-
-    if not success then
-        notify.error("Waybar layout selection failed", tostring(err))
+        return
     end
+
+    local current_layout = get_current_layout()
+    local menu_items = {}
+    local default_row = 0
+
+    for i, layout in ipairs(layouts) do
+        if (layout == current_layout) then
+            table.insert(menu_items, MARKER .. " " .. layout)
+            default_row = i - 1
+        else
+            table.insert(menu_items, layout)
+        end
+    end
+
+    local menu_input = table.concat(menu_items, "\n")
+    local rofi_cmd = string.format(
+        "echo '%s' | rofi -i -dmenu -config '%s' -mesg '%s' -selected-row %d",
+        menu_input:gsub("'", "'\"'\"'"),
+        ROFI_LAYOUT_CONFIG,
+        LAYOUT_MSG,
+        default_row
+    )
+
+    helpers.exec_async(rofi_cmd, function(_, choice)
+        pcall(function()
+            if choice == nil or choice == "" then
+                return
+            end
+
+            choice = choice:gsub("%s+$", "")
+
+            if (choice == "") then
+                return
+            end
+
+            choice = choice:gsub("^" .. MARKER .. " ", "")
+
+            if (choice == "no panel") then
+                hl.exec_cmd("pkill waybar 2>/dev/null || true")
+            else
+                apply_layout(choice)
+            end
+        end)
+    end)
 end
 
 return waybar

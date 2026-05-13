@@ -153,7 +153,7 @@ local function is_gif(filepath)
     return filepath:lower():match("%.gif$") ~= nil
 end
 
----Generate a thumbnail for a GIF
+---Generate a thumbnail for a GIF (synchronous, safe: no compositor IPC)
 -- @param gif_path string Path to the GIF file
 -- @return string Path to the generated thumbnail
 local function generate_gif_thumbnail(gif_path)
@@ -162,11 +162,10 @@ local function generate_gif_thumbnail(gif_path)
 
     hl.exec_cmd("mkdir -p '" .. PATHS.gif_cache .. "'")
 
-    local check_result = helpers.exec("test -f '" .. cache_path .. "'")
-
-    if not check_result.success then
-        hl.exec_cmd(string.format(
-            "magick '%s[0]' -resize 1920x1080 '%s' 2>/dev/null || convert '%s[0]' -resize 1920x1080 '%s' 2>/dev/null",
+    if not helpers.path_exists(cache_path) then
+        helpers.exec(string.format(
+            "magick '%s[0]' -resize 1920x1080 '%s' 2>/dev/null || " ..
+            "convert '%s[0]' -resize 1920x1080 '%s' 2>/dev/null",
             gif_path, cache_path, gif_path, cache_path
         ))
     end
@@ -174,7 +173,7 @@ local function generate_gif_thumbnail(gif_path)
     return cache_path
 end
 
----Generate a thumbnail for a video
+---Generate a thumbnail for a video (synchronous, safe: no compositor IPC)
 -- @param video_path string Path to the video file
 -- @return string Path to the generated thumbnail
 local function generate_video_thumbnail(video_path)
@@ -183,10 +182,8 @@ local function generate_video_thumbnail(video_path)
 
     hl.exec_cmd("mkdir -p '" .. PATHS.video_cache .. "'")
 
-    local check_result = helpers.exec("test -f '" .. cache_path .. "'")
-
-    if not check_result.success then
-        hl.exec_cmd(string.format(
+    if not helpers.path_exists(cache_path) then
+        helpers.exec(string.format(
             "ffmpeg -v error -y -i '%s' -ss 00:00:01.000 -vframes 1 '%s' 2>/dev/null || true",
             video_path, cache_path
         ))
@@ -251,7 +248,38 @@ local function get_rofi_icon_override()
     return string.format("element-icon{size:%d%%;}", math.floor(icon_size))
 end
 
----Apply an image wallpaper using swww
+---After ensuring the swww daemon is running, apply the given image.
+-- @param image_path string
+-- @param target_monitor string
+local function swww_apply_after_daemon(image_path, target_monitor)
+    local swww_cmd = string.format(
+        "swww img -o %s '%s' --transition-fps %d --transition-type %s --transition-duration %d --transition-bezier %s",
+        target_monitor,
+        image_path,
+        SWWW_PARAMS.fps,
+        SWWW_PARAMS.type,
+        SWWW_PARAMS.duration,
+        SWWW_PARAMS.bezier
+    )
+
+    helpers.exec_async(swww_cmd, function(exit_code, _)
+        pcall(function()
+            if exit_code ~= 0 then
+                local notify = require("utils.notify")
+                notify.error("Failed to apply wallpaper")
+
+                return
+            end
+
+            wallpaper.apply_wallust(image_path)
+            refresh.refresh_ui(function()
+                offer_sddm_wallpaper(false)
+            end)
+        end)
+    end)
+end
+
+---Apply an image wallpaper using swww (async)
 -- @param image_path string Path to the image file
 -- @param monitor string The monitor to apply to (uses focused if nil)
 local offer_sddm_wallpaper
@@ -270,38 +298,14 @@ local function apply_image_wallpaper(image_path, monitor)
 
     local daemon_check = helpers.exec("pgrep -x swww-daemon")
 
-    if not daemon_check.success then
+    if daemon_check.success then
+        swww_apply_after_daemon(image_path, target_monitor)
+    else
         hl.exec_cmd("swww-daemon --format xrgb &")
-        helpers.sleep(0.5)
+        helpers.exec_async("sleep 0.5", function(_, _)
+            swww_apply_after_daemon(image_path, target_monitor)
+        end)
     end
-
-    local swww_cmd = string.format(
-        "swww img -o %s '%s' --transition-fps %d --transition-type %s --transition-duration %d --transition-bezier %s",
-        target_monitor,
-        image_path,
-        SWWW_PARAMS.fps,
-        SWWW_PARAMS.type,
-        SWWW_PARAMS.duration,
-        SWWW_PARAMS.bezier
-    )
-
-    local result = helpers.exec(swww_cmd)
-
-    if not result.success then
-        notify.error("Failed to apply wallpaper", result.stderr)
-
-        return
-    end
-
-    wallpaper.apply_wallust(image_path)
-
-    helpers.sleep(2)
-
-    refresh.refresh_ui()
-
-    helpers.sleep(1)
-
-    offer_sddm_wallpaper(false)
 end
 
 ---Apply a video wallpaper using mpvpaper
@@ -357,25 +361,27 @@ offer_sddm_wallpaper = function(is_effect)
 
     hl.exec_cmd("pkill yad 2>/dev/null || true")
 
-    local wallpaper_path = is_effect and PATHS.wallpaper_modified or PATHS.wallpaper_current
     local yad_cmd = string.format(
         "yad --info --text='Set current wallpaper as SDDM background?\\n\\nNOTE: This only applies to SIMPLE SDDM v2 Theme' " ..
         "--text-align=left --title='SDDM Background' --timeout=5 --timeout-indicator=right " ..
         "--button='yes:0' --button='no:1' 2>/dev/null"
     )
 
-    local yad_result = helpers.exec(yad_cmd)
+    helpers.exec_async(yad_cmd, function(exit_code, _)
+        pcall(function()
+            if exit_code ~= 0 then
+                return
+            end
 
-    if (yad_result.success and yad_result.exit_code == 0) then
-        if not command_exists("kitty") then
-            notify.error("Missing kitty", "Install kitty to enable setting SDDM background")
+            if not command_exists("kitty") then
+                notify.error("Missing kitty", "Install kitty to enable setting SDDM background")
 
-            return
-        end
+                return
+            end
 
-        -- Launch SDDM wallpaper setup
-        set_sddm_wallpaper(is_effect and "effects" or "normal")
-    end
+            set_sddm_wallpaper(is_effect and "effects" or "normal")
+        end)
+    end)
 end
 
 ---Set SDDM wallpaper and colors
@@ -584,41 +590,42 @@ function wallpaper.select()
             rofi_override
         )
 
-        local result = helpers.exec(rofi_cmd)
+        helpers.exec_async(rofi_cmd, function(_, choice)
+            pcall(function()
+                if choice == nil or choice == "" then
+                    return
+                end
 
-        if not result.success or result.stdout == "" then
-            return
-        end
+                choice = choice:gsub("%s+$", "")
 
-        local choice = result.stdout:gsub("%s+$", "")
+                if (choice == "" or choice == ". random") then
+                    wallpaper.random()
 
-        if (choice == "" or choice == ". random") then
-            wallpaper.random()
+                    return
+                end
 
-            return
-        end
+                local find_result = helpers.exec(string.format(
+                    "find '%s' -iname '%s*' -print -quit",
+                    PATHS.wallpapers,
+                    choice
+                ))
 
-        local selected_name = choice .. "."
-        local find_result = helpers.exec(string.format(
-            "find '%s' -iname '%s*' -print -quit",
-            PATHS.wallpapers,
-            choice
-        ))
+                if not find_result.success or find_result.stdout == "" then
+                    notify.error("Wallpaper not found", choice)
 
-        if not find_result.success or find_result.stdout == "" then
-            notify.error("Wallpaper not found", choice)
+                    return
+                end
 
-            return
-        end
+                local selected_file = find_result.stdout:gsub("%s+$", "")
 
-        local selected_file = find_result.stdout:gsub("%s+$", "")
-
-        if (is_video(selected_file)) then
-            notify.info("Video wallpaper active this session only — update autostart.lua to persist across restarts")
-            apply_video_wallpaper(selected_file)
-        else
-            apply_image_wallpaper(selected_file, focused_monitor)
-        end
+                if (is_video(selected_file)) then
+                    notify.info("Video wallpaper active this session only — update autostart.lua to persist across restarts")
+                    apply_video_wallpaper(selected_file)
+                else
+                    apply_image_wallpaper(selected_file, focused_monitor)
+                end
+            end)
+        end)
     end)
 
     if not success then
@@ -663,28 +670,29 @@ function wallpaper.random()
 
         kill_non_swww_daemons()
 
-        local daemon_check = helpers.exec("pgrep -x swww-daemon")
-
-        if not daemon_check.success then
-            hl.exec_cmd("swww-daemon --format xrgb &")
-            helpers.sleep(0.5)
-        end
-
         local swww_cmd = string.format(
             "swww img -o %s '%s' --transition-fps 30 --transition-type random --transition-duration 1 --transition-bezier .43,1.19,1,.4",
             monitor,
             selected
         )
 
-        hl.exec_cmd(swww_cmd)
+        local daemon_check = helpers.exec("pgrep -x swww-daemon")
+
+        if daemon_check.success then
+            hl.exec_cmd(swww_cmd)
+        else
+            hl.exec_cmd("swww-daemon --format xrgb &")
+            helpers.exec_async("sleep 0.5", function(_, _)
+                hl.exec_cmd(swww_cmd)
+            end)
+        end
 
         wallpaper.apply_wallust(selected)
 
-        helpers.sleep(2)
-
-        refresh.refresh_ui()
-
-        notify.success("Random wallpaper applied")
+        helpers.exec_async("sleep 2", function(_, _)
+            refresh.refresh_ui()
+            notify.success("Random wallpaper applied")
+        end)
     end)
 
     if not success then
@@ -748,13 +756,13 @@ function wallpaper.effects()
             PATHS.rofi_effect_theme
         )
 
-        local result = helpers.exec(rofi_cmd)
+        helpers.exec_async(rofi_cmd, function(_, choice)
+            pcall(function()
+                if choice == nil or choice == "" then
+                    return
+                end
 
-        if not result.success or result.stdout == "" then
-            return
-        end
-
-        local choice = result.stdout:gsub("%s+$", "")
+                choice = choice:gsub("%s+$", "")
 
         if (choice == "No Effects") then
             hl.exec_cmd(string.format("cp -f '%s' '%s'", PATHS.wallpaper_current, PATHS.wallpaper_modified))
@@ -773,11 +781,10 @@ function wallpaper.effects()
 
             wallpaper.apply_wallust(PATHS.wallpaper_current)
 
-            helpers.sleep(2)
-
-            refresh.refresh_ui()
-
-            notify.info("No effects applied")
+            helpers.exec_async("sleep 2", function(_, _)
+                refresh.refresh_ui()
+                notify.info("No effects applied")
+            end)
 
             return
         end
@@ -801,35 +808,34 @@ function wallpaper.effects()
         )
 
         hl.exec_cmd(magick_cmd)
-
         hl.exec_cmd("killall -SIGUSR1 swaybg 2>/dev/null || true")
         hl.exec_cmd("killall -SIGUSR1 mpvpaper 2>/dev/null || true")
 
-        helpers.sleep(1)
+        helpers.exec_async("sleep 1", function(_, _)
+            local monitor = get_focused_monitor()
 
-        local monitor = get_focused_monitor()
+            if (monitor) then
+                local swww_cmd = string.format(
+                    "swww img -o %s '%s' --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
+                    monitor,
+                    PATHS.wallpaper_modified
+                )
 
-        if (monitor) then
-            local swww_cmd = string.format(
-                "swww img -o %s '%s' --transition-fps 60 --transition-type wipe --transition-duration 2 --transition-bezier .43,1.19,1,.4",
-                monitor,
-                PATHS.wallpaper_modified
-            )
+                hl.exec_cmd(swww_cmd)
+            end
 
-            hl.exec_cmd(swww_cmd)
-        end
+            helpers.exec_async("sleep 2", function(_, _)
+                hl.exec_cmd("wallust run '" .. PATHS.wallpaper_modified .. "' -s")
 
-        helpers.sleep(2)
-
-        hl.exec_cmd("wallust run '" .. PATHS.wallpaper_modified .. "' -s")
-
-        helpers.sleep(1)
-
-        refresh.refresh_ui()
-
-        notify.success(choice .. " effects applied")
-
-        offer_sddm_wallpaper(true)
+                helpers.exec_async("sleep 1", function(_, _)
+                    refresh.refresh_ui()
+                    notify.success(choice .. " effects applied")
+                    offer_sddm_wallpaper(true)
+                end)
+            end)
+        end)
+            end)
+        end)
     end)
 
     if not success then

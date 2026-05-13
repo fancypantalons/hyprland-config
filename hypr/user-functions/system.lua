@@ -182,80 +182,55 @@ end
 -- Supports Alt+Delete to wipe all clipboard history
 -- @function clipboard_manager
 function system.clipboard_manager()
-    local success, err = pcall(function()
-        -- Kill any existing rofi process
-        hl.exec_cmd("pkill rofi 2>/dev/null")
+    hl.exec_cmd("pkill rofi 2>/dev/null")
 
-        local msg = "CTRL+DEL = Delete entry | ALT+DEL = Wipe all"
+    local msg = "CTRL+DEL = Delete entry | ALT+DEL = Wipe all"
 
-        -- Run cliphist list and pipe to rofi
-        local cliphist_result = helpers.exec("cliphist list")
+    helpers.exec_async("cliphist list", function(ec, cliphist_stdout)
+        pcall(function()
+            if ec ~= 0 or cliphist_stdout == "" then
+                notify_error("Failed to get clipboard history", "Is cliphist installed?")
 
-        if not cliphist_result.success then
-            notify_error("Failed to get clipboard history", "Is cliphist installed?")
-
-            return
-        end
-
-        local clipboard_entries = cliphist_result.stdout
-
-        if clipboard_entries == "" then
-            notify_system("Clipboard", "No entries in history")
-
-            return
-        end
-
-        -- Run rofi with the clipboard entries
-        -- Note: We use a shell command to pipe cliphist output to rofi
-        local rofi_cmd = string.format(
-            "echo '%s' | rofi -i -dmenu -kb-custom-1 'Control-Delete' -kb-custom-2 'Alt-Delete' -config '%s' -mesg '%s'",
-            clipboard_entries:gsub("'", "'\"'\"'"),
-            CLIPBOARD_ROFI_THEME,
-            msg
-        )
-
-        local rofi_result = helpers.exec(rofi_cmd)
-        local exit_code = rofi_result.exit_code or 0
-        local selection = rofi_result.stdout and rofi_result.stdout:gsub("%s+$", "") or ""
-
-        -- Exit code 1 = user cancelled
-        if exit_code == 1 then
-            return
-        end
-
-        -- Exit code 0 = user selected an entry
-        if exit_code == 0 then
-            if selection == "" then
                 return
             end
 
-            -- Decode the selection and copy to clipboard
-            local decode_cmd = string.format("echo '%s' | cliphist decode | wl-copy", selection:gsub("'", "'\"'\"'"))
-            local decode_result = helpers.exec(decode_cmd)
+            -- Run rofi with the clipboard entries
+            local rofi_cmd = string.format(
+                "echo '%s' | rofi -i -dmenu -kb-custom-1 'Control-Delete' -kb-custom-2 'Alt-Delete' -config '%s' -mesg '%s'",
+                cliphist_stdout:gsub("%s+$", ""):gsub("'", "'\"'\"'"),
+                CLIPBOARD_ROFI_THEME,
+                msg
+            )
 
-            if not decode_result.success then
-                notify_error("Failed to copy to clipboard")
-            end
+            helpers.exec_async(rofi_cmd, function(rofi_ec, selection)
+                pcall(function()
+                    selection = selection:gsub("%s+$", "")
 
-        -- Exit code 10 (custom-1) = Ctrl+Delete to delete entry
-        elseif exit_code == 10 then
-            if selection ~= "" then
-                local delete_cmd = string.format("echo '%s' | cliphist delete", selection:gsub("'", "'\"'\"'"))
-                hl.exec_cmd(delete_cmd)
+                    if rofi_ec == 1 or selection == "" then
+                        return
+                    end
 
-                notify_system("Clipboard", "Entry deleted")
-            end
+                    if rofi_ec == 0 then
+                        hl.exec_cmd(string.format(
+                            "echo '%s' | cliphist decode | wl-copy",
+                            selection:gsub("'", "'\"'\"'")
+                        ))
 
-        -- Exit code 11 (custom-2) = Alt+Delete to wipe all
-        elseif exit_code == 11 then
-            hl.exec_cmd("cliphist wipe")
-            notify_system("Clipboard", "History wiped")
-        end
+                    elseif rofi_ec == 10 then
+                        hl.exec_cmd(string.format(
+                            "echo '%s' | cliphist delete",
+                            selection:gsub("'", "'\"'\"'")
+                        ))
+                        notify_system("Clipboard", "Entry deleted")
+
+                    elseif rofi_ec == 11 then
+                        hl.exec_cmd("cliphist wipe")
+                        notify_system("Clipboard", "History wiped")
+                    end
+                end)
+            end)
+        end)
     end)
-
-    if not success then
-        notify_error("Clipboard manager failed", tostring(err))
-    end
 end
 
 -- ============================================
@@ -279,13 +254,8 @@ function system.idle_inhibit_toggle()
                 notify_error("Failed to stop hypridle")
             end
         else
-            local start_result = helpers.exec("hypridle")
-
-            if start_result.success then
-                notify_system("Screen auto-lock", "Enabled — screen will lock when idle")
-            else
-                notify_error("Failed to start hypridle")
-            end
+            hl.exec_cmd("hypridle &")
+            notify_system("Screen auto-lock", "Enabled — screen will lock when idle")
         end
     end)
 
@@ -460,34 +430,14 @@ local function resize_window_to(addr, width, height)
     }))
 end
 
----Animate the window sliding down (show)
+---Move the dropdown window to its target position (immediate, no animation)
 local function animate_slide_down(addr, target_x, target_y, width, height)
-    local start_y = target_y - height - 50
-    local steps = 5
-    local step_y = math.floor((target_y - start_y) / steps)
-
-    move_window_to(addr, target_x, start_y)
-    helpers.sleep(0.05)
-
-    for i = 1, steps do
-        move_window_to(addr, target_x, start_y + (step_y * i))
-        helpers.sleep(0.03)
-    end
-
-    -- Ensure final position
     move_window_to(addr, target_x, target_y)
 end
 
----Animate the window sliding up (hide)
+---Placeholder — caller moves window to special workspace immediately after
 local function animate_slide_up(addr, start_x, start_y, width, height)
-    local end_y = start_y - height - 50
-    local steps = 5
-    local step_y = math.floor((start_y - end_y) / steps)
-
-    for i = 1, steps do
-        move_window_to(addr, start_x, start_y - (step_y * i))
-        helpers.sleep(0.03)
-    end
+    -- no-op; window is moved to special workspace by caller
 end
 
 ---Get window geometry
@@ -596,7 +546,6 @@ function system.toggle_dropdown()
 
                 if geom then
                     animate_slide_up(addr, geom.x, geom.y, geom.width, geom.height)
-                    helpers.sleep(0.1)
                 end
 
                 hl.dispatch(hl.dsp.window.pin({ window = window_sel })) -- toggle pin off
@@ -810,33 +759,27 @@ end
 -- ============================================
 
 ---Start XDG Desktop Portals for Hyprland
--- Kills any existing portal processes and starts fresh ones
--- Waits between kills and starts to ensure clean state
+-- Kills any existing portal processes and starts fresh ones.
+-- Chains kills and starts via exec_async to keep sleep outside the event loop.
 -- @function start_portals
 function system.start_portals()
-    local success, err = pcall(function()
-        -- Kill existing portal processes
-        hl.exec_cmd("killall xdg-desktop-portal-hyprland 2>/dev/null || true")
-        hl.exec_cmd("killall xdg-desktop-portal-wlr 2>/dev/null || true")
-        hl.exec_cmd("killall xdg-desktop-portal-gnome 2>/dev/null || true")
-        hl.exec_cmd("killall xdg-desktop-portal 2>/dev/null || true")
-
-        helpers.sleep(1)
-
-        -- Start hyprland portal (try both common paths)
-        hl.exec_cmd("/usr/lib/xdg-desktop-portal-hyprland 2>/dev/null &")
-        hl.exec_cmd("/usr/libexec/xdg-desktop-portal-hyprland 2>/dev/null &")
-
-        helpers.sleep(2)
-
-        -- Start generic portal (try both common paths)
-        hl.exec_cmd("/usr/lib/xdg-desktop-portal 2>/dev/null &")
-        hl.exec_cmd("/usr/libexec/xdg-desktop-portal 2>/dev/null &")
-    end)
-
-    if not success then
-        notify_error("Failed to start portals", tostring(err))
-    end
+    helpers.exec_async(
+        "killall xdg-desktop-portal-hyprland 2>/dev/null; " ..
+        "killall xdg-desktop-portal-wlr 2>/dev/null; " ..
+        "killall xdg-desktop-portal-gnome 2>/dev/null; " ..
+        "killall xdg-desktop-portal 2>/dev/null; " ..
+        "sleep 1",
+        function(_, _)
+            pcall(function()
+                hl.exec_cmd("/usr/lib/xdg-desktop-portal-hyprland 2>/dev/null &")
+                hl.exec_cmd("/usr/libexec/xdg-desktop-portal-hyprland 2>/dev/null &")
+                helpers.exec_async("sleep 2", function(_, _)
+                    hl.exec_cmd("/usr/lib/xdg-desktop-portal 2>/dev/null &")
+                    hl.exec_cmd("/usr/libexec/xdg-desktop-portal 2>/dev/null &")
+                end)
+            end)
+        end
+    )
 end
 
 return system

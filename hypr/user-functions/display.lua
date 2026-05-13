@@ -113,7 +113,6 @@ end
 ---Kill any running hyprsunset process
 local function stop_hyprsunset()
     hl.exec_cmd("pkill -x hyprsunset 2>/dev/null || true")
-    helpers.sleep(0.2)
 end
 
 ---Get the current blur passes setting
@@ -350,11 +349,11 @@ function display.nightlight_toggle()
         stop_hyprsunset()
 
         if (current_state == "on") or running then
-            local result = helpers.exec("hyprsunset -i")
-            helpers.sleep(0.3)
-            stop_hyprsunset()
-            write_state("off")
-            notify_nightlight(false)
+            helpers.exec_async("hyprsunset -i", function(_, _)
+                stop_hyprsunset()
+                write_state("off")
+                notify_nightlight(false)
+            end)
         else
             hl.exec_cmd(string.format("nohup hyprsunset -t %d >/dev/null 2>&1 &", NIGHTLIGHT_TEMP))
             write_state("on")

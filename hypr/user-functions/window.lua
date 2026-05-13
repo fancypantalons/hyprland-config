@@ -133,43 +133,42 @@ end
 
 ---Disable game mode by restoring the snapshotted settings.
 local function disable_game_mode()
-    -- Restart swww daemon and re-set the wallpaper.
-    hl.exec_cmd(string.format("swww-daemon --format xrgb && swww img '%s' &", WALLPAPER_PATH))
-    helpers.sleep(0.1)
+    helpers.exec_async(
+        string.format("swww-daemon --format xrgb && swww img '%s'", WALLPAPER_PATH),
+        function(_, _)
+            pcall(function()
+                local wallpaper = require("user-functions.wallpaper")
+                wallpaper.apply_wallust()
 
-    -- Regenerate wallust colors from the current wallpaper.
-    local wallpaper = require("user-functions.wallpaper")
-    wallpaper.apply_wallust()
-    helpers.sleep(0.5)
+                if game_mode_opacity_rule and game_mode_opacity_rule.set_enabled then
+                    pcall(function() game_mode_opacity_rule:set_enabled(false) end)
+                    game_mode_opacity_rule = nil
+                end
 
-    -- Tear down the runtime opacity rule installed by enable_game_mode.
-    if game_mode_opacity_rule and game_mode_opacity_rule.set_enabled then
-        pcall(function() game_mode_opacity_rule:set_enabled(false) end)
-        game_mode_opacity_rule = nil
-    end
+                if game_mode_saved then
+                    local saved = game_mode_saved
+                    pcall(function()
+                        hl.config.animations.enabled = saved.animations
+                        hl.config.decoration.shadow.enabled = saved.shadow
+                        hl.config.decoration.blur.enabled = saved.blur
+                        hl.config.general.gaps_in = saved.gaps_in
+                        hl.config.general.gaps_out = saved.gaps_out
+                        hl.config.general.border_size = saved.border_size
+                        hl.config.decoration.rounding = saved.rounding
+                    end)
+                    game_mode_saved = nil
+                end
 
-    -- Restore config values from the snapshot if we have one.
-    if game_mode_saved then
-        local saved = game_mode_saved
-        pcall(function()
-            hl.config.animations.enabled = saved.animations
-            hl.config.decoration.shadow.enabled = saved.shadow
-            hl.config.decoration.blur.enabled = saved.blur
-            hl.config.general.gaps_in = saved.gaps_in
-            hl.config.general.gaps_out = saved.gaps_out
-            hl.config.general.border_size = saved.border_size
-            hl.config.decoration.rounding = saved.rounding
-        end)
-        game_mode_saved = nil
-    end
+                refresh.refresh_ui()
 
-    refresh.refresh_ui()
-
-    notify.send({
-        text = "Gamemode: disabled",
-        icon = ICON,
-        timeout = 2000,
-    })
+                notify.send({
+                    text = "Gamemode: disabled",
+                    icon = ICON,
+                    timeout = 2000,
+                })
+            end)
+        end
+    )
 end
 
 ---Toggle game mode on/off

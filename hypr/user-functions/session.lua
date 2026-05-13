@@ -56,8 +56,7 @@ end
 -- Format: Screenshot_${time}_${RANDOM}.png
 -- @return string The generated filename
 local function generate_filename()
-    local time_result = helpers.exec("date '+%d-%b_%H-%M-%S'")
-    local time_str = time_result.stdout:gsub("%s+$", "")
+    local time_str = os.date("%d-%b_%H-%M-%S")
     local random_val = math.random(1000, 9999)
 
     return string.format("Screenshot_%s_%d.png", time_str, random_val)
@@ -94,8 +93,7 @@ end
 -- @param class string The window class name
 -- @return string The generated filename
 local function generate_active_window_filename(class)
-    local time_result = helpers.exec("date '+%d-%b_%H-%M-%S'")
-    local time_str = time_result.stdout:gsub("%s+$", "")
+    local time_str = os.date("%d-%b_%H-%M-%S")
 
     return string.format("Screenshot_%s_%s.png", time_str, class)
 end
@@ -115,23 +113,28 @@ end
 local function play_screenshot_sound() play_sound("screen-capture.*") end
 local function play_error_sound()      play_sound("dialog-error.*")    end
 
----Show countdown notification
--- Displays a notification counting down from the specified seconds
--- @param seconds number The number of seconds to count down
-local function show_countdown(seconds)
-    for sec = seconds, 1, -1 do
-        notify.send({
-            text = string.format("Taking shot in: %d secs", sec),
-            icon = ICON_TIMER,
-            timeout = 1000
-        })
-
-        helpers.sleep(1)
+---Async countdown: show notifications and invoke cb when done.
+-- @param seconds number
+-- @param cb function Called when countdown reaches zero
+local function countdown_then(seconds, cb)
+    if seconds <= 0 then
+        cb()
+        return
     end
+
+    notify.send({
+        text = string.format("Taking shot in: %d secs", seconds),
+        icon = ICON_TIMER,
+        timeout = 1000
+    })
+
+    helpers.exec_async("sleep 1", function(_, _)
+        countdown_then(seconds - 1, cb)
+    end)
 end
 
----Show screenshot notification with actions
--- Displays a notification with Open and Delete actions
+---Show screenshot notification with actions (async, non-blocking)
+-- Displays a notification with Open and Delete actions.
 -- @param filepath string The path to the screenshot file
 -- @param title string The notification title
 local function notify_screenshot(filepath, title)
@@ -141,17 +144,15 @@ local function notify_screenshot(filepath, title)
         title or "Screenshot Saved"
     )
 
-    local result = helpers.exec(notify_cmd)
-
-    if result.success and result.stdout then
-        local response = result.stdout:gsub("%s+$", "")
+    helpers.exec_async(notify_cmd, function(_, response)
+        response = response:gsub("%s+$", "")
 
         if response == "action1" then
             hl.exec_cmd("xdg-open '" .. filepath .. "' &")
         elseif response == "action2" then
             hl.exec_cmd("rm '" .. filepath .. "'")
         end
-    end
+    end)
 end
 
 ---Show error notification for failed screenshot
@@ -170,22 +171,8 @@ end
 -- Uses the session manager to lock the session
 -- @function lock
 function session.lock()
-    local success, err = pcall(function()
-        local result = helpers.exec("loginctl lock-session")
-
-        if (not result.success) then
-            local notify = require("utils.notify")
-            notify.error("Failed to lock screen", result.stderr)
-        else
-            local notify = require("utils.notify")
-            notify.lock()
-        end
-    end)
-
-    if (not success) then
-        local notify = require("utils.notify")
-        notify.error("Lock screen failed", tostring(err))
-    end
+    hl.exec_cmd("loginctl lock-session")
+    notify.lock()
 end
 
 -- ============================================
@@ -289,43 +276,40 @@ local function screenshot_now()
     local filename = generate_filename()
     local filepath = dir .. "/" .. filename
 
-    local result = helpers.exec(string.format("cd %s && grim - | tee %s | wl-copy", dir, filename))
-
-    helpers.sleep(2)
-
-    local check_result = helpers.exec("test -f " .. filepath)
-
-    if check_result.success then
-        play_screenshot_sound()
-        notify_screenshot(filepath, "Screenshot Saved")
-    else
-        notify_screenshot_error("Screenshot NOT Saved")
-    end
+    helpers.exec_async(
+        string.format("cd %s && grim - | tee %s | wl-copy", dir, filename),
+        function(exit_code, _)
+            if exit_code == 0 and helpers.path_exists(filepath) then
+                play_screenshot_sound()
+                notify_screenshot(filepath, "Screenshot Saved")
+            else
+                notify_screenshot_error("Screenshot NOT Saved")
+            end
+        end
+    )
 end
 
 ---Take a screenshot with a timer
 -- Shows countdown, then captures the entire screen
 -- @param seconds number The number of seconds to wait
 local function screenshot_timer(seconds)
-    show_countdown(seconds)
-    helpers.sleep(1)
+    countdown_then(seconds, function()
+        local dir = ensure_screenshot_dir()
+        local filename = generate_filename()
+        local filepath = dir .. "/" .. filename
 
-    local dir = ensure_screenshot_dir()
-    local filename = generate_filename()
-    local filepath = dir .. "/" .. filename
-
-    local result = helpers.exec(string.format("cd %s && grim - | tee %s | wl-copy", dir, filename))
-
-    helpers.sleep(1)
-
-    local check_result = helpers.exec("test -f " .. filepath)
-
-    if check_result.success then
-        play_screenshot_sound()
-        notify_screenshot(filepath, "Screenshot Saved")
-    else
-        notify_screenshot_error("Screenshot NOT Saved")
-    end
+        helpers.exec_async(
+            string.format("cd %s && grim - | tee %s | wl-copy", dir, filename),
+            function(exit_code, _)
+                if exit_code == 0 and helpers.path_exists(filepath) then
+                    play_screenshot_sound()
+                    notify_screenshot(filepath, "Screenshot Saved")
+                else
+                    notify_screenshot_error("Screenshot NOT Saved")
+                end
+            end
+        )
+    end)
 end
 
 ---Take a screenshot of the active window
@@ -351,45 +335,24 @@ local function screenshot_window()
         return
     end
 
-    hl.exec_cmd(string.format("grim -g '%s' %s", geometry, filepath))
-    helpers.sleep(1)
+    helpers.exec_async(
+        string.format("grim -g '%s' %s && wl-copy < %s", geometry, filepath, filepath),
+        function(exit_code, _)
+            if exit_code ~= 0 or not helpers.path_exists(filepath) then
+                hl.exec_cmd(string.format(
+                    'notify-send -u low -i %s " Screenshot of:" " %s NOT Saved."',
+                    ICON_NOTE,
+                    class
+                ))
+                play_error_sound()
 
-    local check_result = helpers.exec("test -f " .. filepath)
-
-    if check_result.success then
-        play_screenshot_sound()
-
-        -- Copy to clipboard
-        hl.exec_cmd("wl-copy < " .. filepath)
-
-        -- Show notification with window class
-        local notify_cmd = string.format(
-            'notify-send -t 10000 -A action1=Open -A action2=Delete -h string:x-canonical-private-synchronous:shot-notify -i %s " Screenshot of:" " %s Saved."',
-            ICON_PICTURE,
-            class
-        )
-
-        local result = helpers.exec(notify_cmd)
-
-        if result.success and result.stdout then
-            local response = result.stdout:gsub("%s+$", "")
-
-            if response == "action1" then
-                hl.exec_cmd("xdg-open '" .. filepath .. "' &")
-            elseif response == "action2" then
-                hl.exec_cmd("rm '" .. filepath .. "'")
+                return
             end
-        end
-    else
-        local notify_cmd = string.format(
-            'notify-send -u low -i %s " Screenshot of:" " %s NOT Saved."',
-            ICON_NOTE,
-            class
-        )
 
-        hl.exec_cmd(notify_cmd)
-        play_error_sound()
-    end
+            play_screenshot_sound()
+            notify_screenshot(filepath, " Screenshot of: " .. class .. " Saved.")
+        end
+    )
 end
 
 ---Take a screenshot of a selected area
@@ -401,22 +364,20 @@ local function screenshot_area()
 
     local tmpfile = "/tmp/screenshot_area_" .. tostring(math.random(1000, 9999)) .. ".png"
 
-    -- Capture area to temp file
-    hl.exec_cmd(string.format("grim -g \"$(slurp)\" - > %s", tmpfile))
+    helpers.exec_async(
+        string.format('grim -g "$(slurp)" - > %s', tmpfile),
+        function(exit_code, _)
+            if exit_code ~= 0 or not helpers.path_exists(tmpfile) then
+                return
+            end
 
-    -- Check if file was created and has content
-    local check_result = helpers.exec("test -s " .. tmpfile)
+            hl.exec_cmd("wl-copy < " .. tmpfile)
+            hl.exec_cmd(string.format("mv %s %s", tmpfile, filepath))
 
-    if check_result.success then
-        -- Copy to clipboard
-        hl.exec_cmd("wl-copy < " .. tmpfile)
-
-        -- Move to final location
-        hl.exec_cmd(string.format("mv %s %s", tmpfile, filepath))
-
-        play_screenshot_sound()
-        notify_screenshot(filepath, "Screenshot Saved")
-    end
+            play_screenshot_sound()
+            notify_screenshot(filepath, "Screenshot Saved")
+        end
+    )
 end
 
 ---Take a screenshot and open in swappy
@@ -424,36 +385,34 @@ end
 local function screenshot_swappy()
     local tmpfile = "/tmp/screenshot_swappy_" .. tostring(math.random(1000, 9999)) .. ".png"
 
-    -- Capture area to temp file
-    hl.exec_cmd(string.format("grim -g \"$(slurp)\" - > %s", tmpfile))
-
-    -- Check if file was created and has content
-    local check_result = helpers.exec("test -s " .. tmpfile)
-
-    if check_result.success then
-        -- Copy to clipboard
-        hl.exec_cmd("wl-copy < " .. tmpfile)
-
-        play_screenshot_sound()
-
-        -- Show notification with swappy option
-        local notify_cmd = string.format(
-            'notify-send -t 10000 -A action1=Open -A action2=Delete -h string:x-canonical-private-synchronous:shot-notify -i %s " Screenshot:" " Captured by Swappy"',
-            ICON_PICTURE
-        )
-
-        local result = helpers.exec(notify_cmd)
-
-        if result.success and result.stdout then
-            local response = result.stdout:gsub("%s+$", "")
-
-            if response == "action1" then
-                hl.exec_cmd("swappy -f - < " .. tmpfile)
-            elseif response == "action2" then
-                hl.exec_cmd("rm " .. tmpfile)
+    helpers.exec_async(
+        string.format('grim -g "$(slurp)" - > %s', tmpfile),
+        function(exit_code, _)
+            if exit_code ~= 0 or not helpers.path_exists(tmpfile) then
+                return
             end
+
+            hl.exec_cmd("wl-copy < " .. tmpfile)
+            play_screenshot_sound()
+
+            local notify_cmd = string.format(
+                'notify-send -t 10000 -A action1=Open -A action2=Delete ' ..
+                '-h string:x-canonical-private-synchronous:shot-notify ' ..
+                '-i %s " Screenshot:" " Captured by Swappy"',
+                ICON_PICTURE
+            )
+
+            helpers.exec_async(notify_cmd, function(_, response)
+                response = response:gsub("%s+$", "")
+
+                if response == "action1" then
+                    hl.exec_cmd("swappy -f - < " .. tmpfile)
+                elseif response == "action2" then
+                    hl.exec_cmd("rm " .. tmpfile)
+                end
+            end)
         end
-    end
+    )
 end
 
 ---Take a screenshot with various modes

@@ -40,31 +40,63 @@ end
 local callbacks = {}
 
 ---Run a shell command asynchronously and invoke a callback upon completion.
+-- Writes the command to a temp script to avoid shell-quoting issues.
 --
--- @param cmd string Shell command to run (executed via /bin/sh -c through io.popen)
--- @param cb closure The callback to invoke, receives the command exit code and
--- output as arguments
+-- @param cmd string Shell command to run
+-- @param cb closure Called with (exit_code, stdout_stderr) where exit_code is a number
 function helpers.exec_async(cmd, cb)
    local id = tostring(os.time()) .. "_" .. tostring(math.random(10000, 99999))
    callbacks[id] = cb
 
    local outfile = "/tmp/exec_" .. id .. ".out"
-   hl.exec_cmd(string.format(
-       '%s > %s 2>&1; hyprctl eval "helpers.exec_callback(\'%s\', $?, \'%s\')"',
-       cmd, outfile, id, outfile
+   local ecfile  = "/tmp/exec_" .. id .. ".ec"
+   local scriptfile = "/tmp/exec_" .. id .. ".sh"
+
+   helpers.write_file(scriptfile, string.format(
+       [[#!/bin/sh
+{
+(%s)
+} > %s 2>&1
+echo $? > %s
+hyprctl eval 'helpers.exec_callback("%s")'
+rm -f %s
+]],
+       cmd, outfile, ecfile, id, scriptfile
    ))
+
+   hl.exec_cmd("chmod +x " .. scriptfile .. " && " .. scriptfile .. " &")
 end
 
-function helpers.exec_callback(id, exit_code, outfile)
+function helpers.exec_callback(id)
    local cb = callbacks[id]
    callbacks[id] = nil
 
    if not cb then return end
 
+   local outfile = "/tmp/exec_" .. id .. ".out"
+   local ecfile  = "/tmp/exec_" .. id .. ".ec"
    local data = helpers.read_file(outfile) or ""
-   hl.exec_cmd("rm -f " .. outfile)
+   local ec_str = helpers.read_file(ecfile) or "0"
+   local exit_code = tonumber(ec_str:match("%d+")) or 0
+
+   hl.exec_cmd("rm -f " .. outfile .. " " .. ecfile)
 
    cb(exit_code, data)
+end
+
+---Test exec_async callback mechanism. Sends a notification with exit code and output.
+-- Run: hyprctl eval 'helpers.test_async()'
+function helpers.test_async()
+    helpers.exec_async(
+        "echo 'stdout works' && echo 'stderr works' >&2 && exit 42",
+        function(exit_code, output)
+            local f = io.open("/tmp/exec_async_test_result", "w")
+            if f then
+                f:write(string.format("exit=%d out=[%s]", exit_code, output:gsub("%s+$", "")))
+                f:close()
+            end
+        end
+    )
 end
 
 ---Pause execution for a specified number of seconds
@@ -182,5 +214,7 @@ function helpers.get_binds()
 
     return binds
 end
+
+_G.helpers = helpers
 
 return helpers
