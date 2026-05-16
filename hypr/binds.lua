@@ -1,6 +1,8 @@
 -- Keybindings
 -- Based on configs/Keybinds.conf, UserConfigs/Laptops.conf, and UserConfigs/UserKeybinds.conf
 
+local proc    = require("utils.proc")
+
 local mod = "SUPER"
 local scriptsDir = configDir .. "/scripts"
 
@@ -70,10 +72,10 @@ hl.bind("ALT + Print",                  function() user.session.screenshot("wind
 hl.bind(mod .. " + SHIFT + S",          function() user.session.screenshot("swappy") end, { desc = "Screenshot to swappy" })
 
 -- Resize windows (repeating)
-hl.bind(mod .. " + SHIFT + left",  hl.dsp.window.resize({ x = -50, y = 0 }), { repeating = true, desc = "Shrink window left" })
-hl.bind(mod .. " + SHIFT + right", hl.dsp.window.resize({ x = 50,  y = 0 }), { repeating = true, desc = "Grow window right" })
-hl.bind(mod .. " + SHIFT + up",    hl.dsp.window.resize({ x = 0, y = -50 }), { repeating = true, desc = "Shrink window up" })
-hl.bind(mod .. " + SHIFT + down",  hl.dsp.window.resize({ x = 0,  y = 50 }), { repeating = true, desc = "Grow window down" })
+hl.bind(mod .. " + SHIFT + left",  hl.dsp.window.resize({ x = -50, y = 0, relative = true }), { repeating = true, desc = "Shrink window left" })
+hl.bind(mod .. " + SHIFT + right", hl.dsp.window.resize({ x = 50,  y = 0, relative = true }), { repeating = true, desc = "Grow window right" })
+hl.bind(mod .. " + SHIFT + up",    hl.dsp.window.resize({ x = 0, y = -50, relative = true }), { repeating = true, desc = "Shrink window up" })
+hl.bind(mod .. " + SHIFT + down",  hl.dsp.window.resize({ x = 0,  y = 50, relative = true }), { repeating = true, desc = "Grow window down" })
 
 -- Move windows
 hl.bind(mod .. " + CTRL + left",  hl.dsp.window.move({ direction = "l" }), { desc = "Move window left" })
@@ -163,11 +165,7 @@ hl.bind(mod .. " + E",      function() user.system.file_manager() end,          
 
 -- Special applications
 hl.bind(mod .. " + S", function()
-  local handle = io.popen("pgrep signal")
-  local result = handle:read("*a")
-  handle:close()
-
-  if (result ~= "") then
+  if proc.running("signal", false) then
     hl.dispatch(hl.dsp.workspace.toggle_special("signal"))
   else
     hl.dispatch(hl.dsp.exec_cmd("gtk-launch org.signal.Signal"))

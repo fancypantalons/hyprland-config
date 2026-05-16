@@ -20,8 +20,15 @@ end
 ---Return true if at least one process with this exact name is running.
 -- @param name string Process name
 -- @return boolean
-function proc.running(name)
-    local r = helpers.exec("pgrep -x " .. helpers.shquote(name) .. " >/dev/null 2>&1 && echo y")
+function proc.running(name, exact)
+    local cmd = "pgrep "
+
+    if (exact == true) or (exact == nil) then
+        cmd = cmd .. "-x "
+    end
+    
+    local r = helpers.exec(cmd .. helpers.shquote(name) .. " >/dev/null 2>&1 && echo y")
+
     return r.success and helpers.trim(r.stdout) == "y"
 end
 
