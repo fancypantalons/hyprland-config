@@ -129,10 +129,39 @@ local function switch_to_master()
     notify.send({ text = "Master layout", icon = icons.system.info, timeout = 2000 })
 end
 
+local function switch_to_scrolling()
+    hl.unbind("SUPER + J"); hl.unbind("SUPER + K"); hl.unbind("SUPER + O")
+    pcall(function() hl.config.general.layout = "scrolling" end)
+    hl.bind("SUPER + J", hl.dsp.window.cycle_next())
+    hl.bind("SUPER + K", hl.dsp.window.cycle_next({ prev = true }))
+    hl.bind("SUPER + O", hl.dsp.layout("promote"))
+    notify.send({ text = "Scrolling layout", icon = icons.system.info, timeout = 2000 })
+end
+
+local function switch_to_monocle()
+    hl.unbind("SUPER + J"); hl.unbind("SUPER + K"); hl.unbind("SUPER + O")
+    pcall(function() hl.config.general.layout = "monocle" end)
+    hl.bind("SUPER + J", hl.dsp.layout("cyclenext"))
+    hl.bind("SUPER + K", hl.dsp.layout("cycleprev"))
+    notify.send({ text = "Monocle layout", icon = icons.system.info, timeout = 2000 })
+end
+
 function window.layout_toggle()
     helpers.safe_call("Layout toggle failed", function()
-        local ok, layout = pcall(function() return hl.config.general.layout end)
-        if ok and layout == "master" then switch_to_dwindle() else switch_to_master() end
+        local ws = hl.get_active_workspace()
+        if (ws == nil) then return end
+
+        local layout = ws.layout
+
+        if (layout == "master") then
+            switch_to_dwindle()
+        elseif (layout == "dwindle") then
+            switch_to_scrolling()
+        elseif (layout == "scrolling") then
+            switch_to_monocle()
+        else
+            switch_to_master()
+        end
     end)
 end
 
