@@ -248,9 +248,9 @@ rule(
 -- OPACITY
 -- ============================================
 
-apply_to_tag("terminal", { opacity = "0.96 0.90" })
+apply_to_tag("terminal", { opacity = "1.0 1.0" })
 
-rule({ class = "^neovide$" }, { opacity = "0.96 0.90" })
+rule({ class = "^neovide$" }, { opacity = "1.0 1.0" })
 
 -- ============================================
 -- SIZE
